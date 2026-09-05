@@ -1,0 +1,275 @@
+# The dataset half of the pipeline, offline.
+#
+# Split from ci.yml because that file had grown past the four-hundred-line limit
+# this repository keeps for every committed source file, and because the two jobs
+# genuinely answer different questions: ci.yml asks whether a log becomes a
+# window without leaking anything, and this asks whether a window becomes a
+# dataset that project 1 will load.
+#
+# There are no secrets here and no `secrets.*` reference anywhere in the file.
+# `loghog label` runs with `--dry-run`, which calls nothing and writes a fixed
+# placeholder list. A scheduled job holding a key would spend somebody's quota on
+# every push and would eventually record a "live" number nobody chose to buy.
+#
+# The four claims this job exists to check, none of which a unit test can make:
+#
+#   banners     everything a dry run touches says SYNTHETIC on its own first line
+#   schema      the emitted YAML loads with regression_detect.goldens.load_goldens
+#   the gate    `promote` REFUSES a [SYNTHETIC] placeholder, and writes nothing
+#   privacy     no report carries the case; the two files that do carry it
+#               carry the redacted case
+#
+# The action SHAs are pinned and were copied from project 1's workflow, which is
+# where they were first read. A tag is a moving reference, and an action that
+# changes under a pinned tag is a supply-chain problem in the one place a
+# repository executes somebody else's code.
+
+name: dataset
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline:
+    name: label, emit, promote, health, drift — offline, on the demo windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # A copy, not the checkout. Nothing here should ever write inside the
+      # repository, and the last step of this job asserts that it did not.
+      - name: The dataset lifecycle, offline
+        run: |
+          set -euo pipefail
+          demo="$(mktemp -d)"
+          cp loghog.toml "$demo/"
+          cp -R mappings "$demo/"
+
+          # `dedupe = false` for these windows on purpose: deduplication is on
+          # the input, and the demo logs are deliberately full of near-duplicate
+          # families that the cluster cap is supposed to fold rather than the
+          # deduplicator.
+          sed 's/^dedupe = true/dedupe = false/' "$demo/loghog.toml" > "$demo/nodedupe.toml"
+          nodedupe() { uv run loghog "$@" --config "$demo/nodedupe.toml"; }
+
+          # --- Phase C, over the two committed demo windows ----------------
+          #
+          # Two invented weeks of 120 records each, in the shape almost every
+          # gateway logs by default. Window B is a week in which something
+          # broke: the error rate roughly quadruples and about a third of its
+          # subjects are ones window A never saw. `drift` is asserted to say so.
+          echo "--- Phase C: label, emit, promote, health ---"
+          nodedupe ingest --input logs/demo_window_a.jsonl --format jsonl \
+              --mapping openai_chat_jsonl --window wa --synthetic
+          nodedupe score   --window wa --existing docs/examples/goldens.handwritten.yaml
+          nodedupe cluster --window wa
+          nodedupe select  --window wa --existing docs/examples/goldens.handwritten.yaml
+          nodedupe label   --window wa --dry-run | tee "$demo/label.txt"
+          nodedupe emit    --window wa | tee "$demo/emit.txt"
+
+          echo "--- a dry run says SYNTHETIC on the first line of everything it writes ---"
+          head -1 "$demo/label.txt" | grep -q '^SYNTHETIC'
+          head -1 "$demo/selected/wa/label.md" | grep -q '^SYNTHETIC'
+          head -1 "$demo/selected/wa/selection.md" | grep -q '^SYNTHETIC'
+          head -1 "$demo/goldens/candidates-wa.yaml" | grep -q '^# SYNTHETIC'
+          head -1 "$demo/goldens/review-wa.md" | grep -q '^SYNTHETIC'
+          head -1 logs/README.md | grep -q '^SYNTHETIC'
+          for example in docs/examples/*.synthetic.md; do
+            head -1 "$example" | grep -q '^SYNTHETIC' || {
+              echo "::error::${example} does not lead with its banner."
+              exit 1
+            }
+          done
+          head -1 docs/examples/candidates.synthetic.yaml | grep -q '^# SYNTHETIC'
+
+          # The claim the whole stage rests on: what `emit` writes is not "valid
+          # YAML", it is a file PROJECT 1'S OWN LOADER accepts. Checked by
+          # calling that loader, not by restating its schema.
+          echo "--- the emitted YAML loads with regression_detect.goldens.load_goldens ---"
+          uv run python -c "
+          from regression_detect.goldens import load_goldens
+          for path in ('$demo/goldens/candidates-wa.yaml',
+                       'docs/examples/candidates.synthetic.yaml',
+                       'docs/examples/goldens.handwritten.yaml'):
+              cases = load_goldens(path)
+              assert cases, path
+              assert all(case.criteria for case in cases), path
+              print(path, len(cases), 'case(s)')
+          "
+          grep -q 'tags: \[loghog,' "$demo/goldens/candidates-wa.yaml"
+
+          # The most important refusal in the repository. The candidates file
+          # says "do not promote them" in its first three lines, and a tool that
+          # prints that and then does it anyway has taught its operator that its
+          # warnings are decorative.
+          echo "--- promote REFUSES a dry-run placeholder ---"
+          first=$(uv run python -c "
+          from regression_detect.goldens import load_goldens
+          print(load_goldens('$demo/goldens/candidates-wa.yaml')[0].id)")
+          set +e
+          nodedupe promote --file "$demo/goldens/candidates-wa.yaml" --ids "$first" \
+              --into "$demo/target.yaml" --reviewed-by "CI" 2> "$demo/promote.txt"
+          refused=$?
+          set -e
+          test "${refused}" -eq 3 || {
+            echo "::error::promote accepted a [SYNTHETIC] placeholder; exit was ${refused}."
+            exit 1
+          }
+          grep -q 'SYNTHETIC' "$demo/promote.txt"
+          test ! -f "$demo/target.yaml" || {
+            echo "::error::a refused promotion wrote a target file anyway."
+            exit 1
+          }
+
+          echo "--- promote refuses without a reviewer, and refuses an unknown id ---"
+          set +e
+          nodedupe promote --file docs/examples/goldens.handwritten.yaml \
+              --ids parcel_left_in_bin --into "$demo/target.yaml" 2> /dev/null
+          unnamed=$?
+          nodedupe promote --file docs/examples/goldens.handwritten.yaml --ids no_such_case \
+              --into "$demo/target.yaml" --reviewed-by "CI" 2> "$demo/unknown.txt"
+          unknown=$?
+          set -e
+          test "${unnamed}" -eq 2 || {
+            echo "::error::promote without --reviewed-by exited ${unnamed}, expected argparse's 2."
+            exit 1
+          }
+          test "${unknown}" -eq 3
+          grep -q 'no_such_case' "$demo/unknown.txt"
+
+          # A real promotion, out of the hand-written example rather than out of
+          # a dry run — the only file in the repository whose criteria a person
+          # actually wrote.
+          echo "--- a real case promotes, and the result still loads ---"
+          nodedupe promote --file docs/examples/goldens.handwritten.yaml \
+              --ids parcel_left_in_bin,cracked_kettle_lid \
+              --into "$demo/target.yaml" --reviewed-by "CI" | tee "$demo/promoted.txt"
+          grep -q 'reviewed by CI' "$demo/promoted.txt"
+          uv run python -c "
+          from regression_detect.goldens import load_goldens
+          cases = load_goldens('$demo/target.yaml')
+          assert len(cases) == 2, cases
+          assert all('REVIEWED AND PROMOTED' in (case.notes or '') for case in cases)
+          print('promoted', [case.id for case in cases])
+          "
+
+          echo "--- health, against the hand-written dataset ---"
+          nodedupe ingest --input logs/demo_window_b.jsonl --format jsonl \
+              --mapping openai_chat_jsonl --window wb --synthetic
+          nodedupe score   --window wb --existing docs/examples/goldens.handwritten.yaml
+          nodedupe cluster --window wb
+          nodedupe health  --window wb --goldens docs/examples/goldens.handwritten.yaml \
+              | tee "$demo/health.txt"
+          grep -q 'coverage' "$demo/health.txt"
+          grep -q 'Wilson' "$demo/health.txt"
+          head -1 "$demo/health/wb.md" | grep -q '^SYNTHETIC'
+          uv run python -c "
+          import json
+          payload = json.load(open('$demo/health/wb.json'))
+          assert payload['synthetic'] is True
+          assert payload['coverage']['total_clusters'] > 0
+          assert len(payload['signal_coverage']) == 13, payload['signal_coverage']
+          print('coverage', payload['coverage']['share'])
+          "
+
+          echo "--- drift sees the bad week ---"
+          nodedupe drift --from wa --to wb | tee "$demo/demo-drift.txt"
+          grep -q 'intervals separated' "$demo/demo-drift.txt"
+          head -1 "$demo/drift/wa-vs-wb.md" | grep -q '^SYNTHETIC'
+
+          echo "--- what must NOT be in anything Phase C wrote ---"
+          for report in "$demo/selected/wa/label.md" \
+                        "$demo/selected/wa/selection.md" \
+                        "$demo/health/wb.md" \
+                        "$demo/drift/wa-vs-wb.md"; do
+            for leaked in 'susan.calvin@example.com' 'kim.reyes@example.com' \
+                          '4242 4242 4242 4242' '123-45-6789' \
+                          'recycling bin' 'cracked' 'Dr Susan Calvin'; do
+              if grep -qF "${leaked}" "${report}"; then
+                echo "::error::${report} carries '${leaked}'. A report is not a copy of the data."
+                exit 1
+              fi
+            done
+          done
+
+          # The two files that DO carry the case, because a review of criteria
+          # without the case they came from is a spelling check. They carry the
+          # REDACTED case, which is the only reason they may exist at all — so
+          # the check is that raw values are absent and that redaction TOKENS
+          # are present, whichever classes this shortlist happened to include.
+          echo "--- the emitted dataset and the review carry the redacted case ---"
+          for holder in "$demo/goldens/candidates-wa.yaml" "$demo/goldens/review-wa.md"; do
+            for leaked in 'susan.calvin@example.com' 'kim.reyes@example.com'                           '4242 4242 4242 4242' '4111-1111-1111-1111' '123-45-6789'                           'GB33BUKB20201555555555' '192.168.1.14' '221B Baker Street'; do
+              if grep -qF "${leaked}" "${holder}"; then
+                echo "::error::${holder} carries ${leaked}. Redaction did not hold."
+                exit 1
+              fi
+            done
+            grep -qE '\[[A-Z]+_[0-9]+\]' "${holder}" || {
+              echo "::error::${holder} carries no redaction token at all."
+              exit 1
+            }
+          done
+          # Structural rather than textual: one unticked box per criterion and
+          # one verdict line per case, whichever cases this run chose.
+          cases=$(uv run python -c "
+          from regression_detect.goldens import load_goldens
+          print(len(load_goldens('$demo/goldens/candidates-wa.yaml')))")
+          boxes=$(grep -c '^- \[ \] ' "$demo/goldens/review-wa.md")
+          verdicts=$(grep -c 'Accept / Edit / Reject' "$demo/goldens/review-wa.md")
+          test "${verdicts}" -eq "${cases}" || {
+            echo "::error::${verdicts} verdict line(s) for ${cases} case(s)."
+            exit 1
+          }
+          test "${boxes}" -ge $((cases * 3)) || {
+            echo "::error::${boxes} criterion box(es) for ${cases} case(s); expected 3 or more each."
+            exit 1
+          }
+          grep -q 'The input, as redacted' "$demo/goldens/review-wa.md"
+
+          # The rule the whole repository keeps: a model id lives in
+          # src/loghog/config.py and nowhere else. The id is READ from that
+          # module rather than written here, so this file does not become the
+          # second place it appears — which is the failure it is checking for.
+          echo "--- a model id lives in config.py and nowhere else ---"
+          model_id=$(uv run python -c "from loghog.config import LABEL_MODEL_ID; print(LABEL_MODEL_ID)")
+          echo "the only place that names a model: src/loghog/config.py"
+          # `-e` rather than a bare pattern, and the options before the path:
+          # `grep -F -- "$pattern" --include=...` reads every --include as a
+          # FILENAME, fails with "No such file or directory", returns non-zero,
+          # and the `if` then reports success. A check that passes by erroring is
+          # worse than no check.
+          if grep -rn -F -e "${model_id}" --include='*.toml' --include='*.yml' \
+              --include='*.yaml' --include='*.md' . ; then
+            echo "::error::the model id appears outside src/loghog/config.py."
+            exit 1
+          fi
+
+          # `git status --porcelain` is the load-bearing check because it sees
+          # untracked files too — a stage that wrote a brand-new records/ into
+          # the checkout would leave `git diff` completely silent. `records/` is
+          # gitignored, so this also proves the ignore rule is anchored the way
+          # it claims to be.
+          echo "--- the checkout was not touched ---"
+          git status --porcelain
+          test -z "$(git status --porcelain)" || {
+            echo "::error::the lifecycle job wrote inside the checkout."
+            exit 1
+          }
+          test ! -d records || {
+            echo "::error::a records/ directory appeared in the checkout."
+            exit 1
+          }
+          echo "the checkout is clean"

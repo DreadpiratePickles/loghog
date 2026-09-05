@@ -15,6 +15,12 @@ Phase B is stages 03, 04, 05 and 09 — scoring, clustering, selection and drift
 §45-§47 are drift, and §48-§49 are what Phase B found by running it. All four
 stages are deterministic; §30 is about why.
 
+Phase C is stages 06, 07 and 08 — labelling, emission and dataset health, and it
+is where the first model call in this repository lives. §51-§56 are labelling,
+§57-§61 are emission and the human gate, §62-§65 are health, §66-§67 are the demo
+data and the recorded example, and §68-§69 are what Phase C found by running it
+and what it still does not claim.
+
 ---
 
 ## 1. The problem, and why "log the traffic" is not a solution to it
@@ -745,7 +751,10 @@ the signal and having nothing to point it at. It became a reported impediment
 rather than a silent zero, which is a better outcome than either of the two
 changes that would have hidden it.
 
-## 50. What Phase B does not claim
+## 50. What Phase B did not claim, at the time
+
+> Kept as written, because a caveat that is quietly deleted once it stops being
+> true is a caveat nobody believed in the first place. §69 is the current one.
 
 - **Still no model call, anywhere.** Six of nine stages are built and none of
   them has ever left the machine. There is no live figure in this repository
@@ -766,3 +775,344 @@ changes that would have hidden it.
   is where support traffic sat in an invented corpus. It is the first number to
   change against your own log, and the report prints it every time so that
   changing it is an argument somebody can have.
+
+
+---
+
+## 51. Why there is exactly one model call per candidate, and no loop
+
+Everything before stage 06 is arithmetic on a log. This stage asks a model a
+question, and the question is the most consequential one in the repository:
+*what would a good answer to this have to satisfy?* A criterion that reaches a
+goldens file becomes the definition of correct for every later evaluation of the
+system it came from.
+
+The obvious design is an agent: draft, critique, revise, maybe fetch a couple of
+similar cases, maybe ask a second model whether the criteria are checkable. Each
+of those is defensible on its own and together they make the cost of labelling a
+dataset a number nobody can predict.
+
+So it is one call. Not one per criterion, not one per criterion per pass — one
+per candidate, with the parse doing the work a critique pass would have done.
+The cost of a labelling run is `len(candidates)` calls, and you can read that
+number off the `select` output before you spend anything.
+
+The bound is also what makes `[label] max_calls` meaningful. A stage whose call
+count was emergent could not have a budget, only a limit that fired somewhere in
+the middle of a run.
+
+## 52. Why the budget refuses rather than truncating
+
+`max_calls` is checked before the first call, and a shortlist longer than it
+stops the run.
+
+Truncating is the tempting alternative and it is worse in a specific way: it
+produces a dataset whose *contents* depend on where a budget ran out. Two people
+running the same command against the same window with different budgets get
+different datasets, both of which look complete, and neither of which says which
+records were never considered. Then somebody compares coverage between them.
+
+Refusing puts the decision back where it belongs — lower `[select]
+max_candidates`, or raise the budget, in a diff somebody reviews.
+
+## 53. Why a criterion may not quote a redaction token
+
+This is the rule peculiar to loghog, and it exists because of stage 02.
+
+The input reaching the drafter has been redacted: `[EMAIL_1]` stands where an
+address was, `[NAME_2]` where somebody's name was. A model that has not been told
+otherwise will happily write *"Names the account holder [EMAIL_1]"* — which is an
+acceptance test asserting that a production system emits loghog's own redaction
+marker. Nothing has ever done that and nothing ever will, so the criterion is a
+guaranteed failure attached to a case that was probably fine.
+
+The system prompt says not to. The parser refuses the ones that do it anyway,
+because "the prompt asks for it" is not a validation strategy.
+
+The pattern is `\[[A-Z]+_\d+\]`, which deliberately does not match
+`[SYNTHETIC]` — that has no number, because it is a provenance tag rather than a
+stand-in for somebody's address.
+
+## 54. Why a failed draft is a row with a null, not a retry and not an empty list
+
+Two decisions in one.
+
+**Not a retry**, beyond the bounded ones project 1's provider already does. A
+labelling run that aborted on the first 429 would throw away every draft it had
+already paid for, and one that retried indefinitely would turn a bounded stage
+into an unbounded one — which is §51 undone.
+
+**Not an empty list.** `criteria: []` and `criteria: null` read the same to a
+careless eye and mean opposite things: "the model was asked and produced nothing
+usable" against "there are no criteria for this case". Everywhere else in this
+package an absent field is `null` and an empty one is an error, and a reader of
+one row should not have to know which convention this file chose.
+
+The failed candidate is then left out of the emitted dataset entirely and listed
+in the review document with its error type, so the two files agree about how many
+candidates there were.
+
+## 55. Why a dry run paces at zero and still validates the interval
+
+Pacing exists to spread a burst of calls inside a per-minute provider quota. A
+dry run makes no calls, so it consumes no quota, so honouring `min_interval_ms`
+there buys nothing — and costs four minutes on a shortlist of forty, which is how
+a dry run stops being something anybody runs.
+
+But `--min-interval-ms -5 --dry-run` is still refused. The value is validated
+where it is *given* rather than where it is used, because a typo swallowed
+because of an unrelated flag is a typo that reappears on the live run somebody
+was rehearsing for.
+
+## 56. Why the labels live beside the shortlist and not in the window
+
+The planned contract put `labels.jsonl` in `records/<window>/`. It is in
+`selected/<window>/` instead.
+
+A drafted criterion is *about* one case and paraphrases it: "states that the
+parcel was left in a bin without contact" is most of the ticket. So it belongs in
+the directory that is gitignored because it holds the case — next to the
+candidate that provoked it — rather than in the window of records it was never
+part of. The window holds evidence; `selected/` holds what was made of it.
+
+## 57. Why the emitted file's contract is a function call, not a schema
+
+`goldens/candidates-<window>.yaml` is not specified as "valid YAML in project 1's
+shape". It is specified as *a file `regression_detect.goldens.load_goldens`
+accepts*, and both the test suite and CI check it by calling that function.
+
+Restating the schema here would produce two definitions of a golden case that
+agree today. They would disagree the first time project 1 tightened a rule, and
+the disagreement would surface as a mining run that produced a file the tool it
+was mined for could not read — six weeks later, in somebody else's repository.
+
+The same argument already justified `--existing` in Phase B. This is the same
+seam used from the other side: there the loader checks an input, here it checks
+an output.
+
+## 58. Why every scalar is round-tripped rather than trusted
+
+A production input is arbitrary text. In the demo windows alone it contains
+colons, a Japanese sentence, a single-word message, redaction tokens in square
+brackets and leading whitespace. In a real log it will contain three backticks,
+a line that starts with `- `, and the string `null`.
+
+So every scalar is rendered as a literal block, the rendering is **parsed back
+and compared to the original**, and anything that does not survive falls back to
+a double-quoted scalar. Then the whole file is parsed once more and every id,
+input and criteria tuple is compared to what it was built from.
+
+That is three verifications for one file, and it is proportionate: this file
+becomes somebody's definition of correct, and an input mangled on the way out is
+a criterion about a record that never existed. Guessing which texts are safe is
+how a mining run silently breaks the one case that mattered.
+
+## 59. Why promotion appends text instead of rewriting the file
+
+Loading a goldens file with PyYAML and dumping it back produces a valid file with
+every comment deleted. In a goldens file the comments are half the content: the
+category checklist, the worked examples, the note explaining why a case exists
+and what broke the day somebody removed it.
+
+So accepted cases are rendered and appended to the existing bytes, and the result
+is re-loaded with `load_goldens` before it replaces anything. If the append
+produced something project 1 cannot read, nothing is written and the original is
+exactly as it was.
+
+## 60. Why `promote` refuses a `[SYNTHETIC]` placeholder
+
+`loghog label --dry-run` writes four fixed criteria, identical for every case,
+and `emit` puts "Do not promote them" in the first three lines of the file it
+produces.
+
+A tool that prints that and then does it anyway has taught its operator that its
+warnings are decorative — and the next warning it prints, about something that
+matters, will be skimmed. So the sentence is enforced rather than printed: any
+case still carrying the marker, in a criterion or in its notes, is refused by id.
+
+The notes are checked as well as the criteria on purpose. Somebody who rewrote
+the four placeholder criteria by hand has done most of a review, but the notes
+still say *nothing read this record*, and that sentence is either true or it
+should not be in the file.
+
+There is no `--force`. The way to promote a case is to label it for real, or to
+write its criteria yourself and delete the marker — both of which are somebody
+taking responsibility for the sentence, which is the entire point of the gate.
+
+## 61. Why there is no `--all`, and why `--reviewed-by` is required
+
+Promotion takes ids, comma-separated, in the order they were typed. A repeat is
+refused rather than deduplicated, because somebody who typed an id twice probably
+meant a different second id.
+
+A switch that promoted everything would make `--reviewed-by` a lie in the same
+commit that introduced it. The name in the notes is the only thing that answers
+"who decided this was correct?", and that is the question that matters the first
+time the case fails somebody's build at four in the afternoon.
+
+## 62. Why coverage and staleness share one threshold
+
+Coverage asks whether a cluster of traffic has a golden case near it. Staleness
+asks whether a golden case has traffic near it. They are the same relation read
+from both ends.
+
+Two thresholds would let one report say a cluster is covered by a case that is
+itself stale against that cluster — which is not a finding, it is a
+contradiction, and it would be a contradiction nobody noticed because the two
+numbers appear in different sections.
+
+`[health] neighbour_jaccard` is still separate from `[cluster]
+jaccard_threshold`, because merging two records into one case is a stricter claim
+than noticing that a case is about the same subject as some traffic, and one
+number for both would tie two unrelated arguments together.
+
+## 63. Why a cluster is covered when *any* member is
+
+The cheap version asks whether the cluster's representative has a case near it.
+It is wrong, and single-linkage is why: merging is transitive, so a
+representative can be several links away from the member a case actually matches.
+A cluster would then be reported as uncovered while holding the very record the
+dataset was built from.
+
+The cost of doing it properly is one Jaccard per record per case, which at the
+sizes an eval set has is nothing.
+
+## 64. Why `novelty` is excluded from the interesting-versus-ordinary comparison
+
+Stage 08's most useful line compares coverage of clusters where a signal fired
+against coverage of clusters where none did. A dataset that covers the dull
+traffic and misses the interesting traffic passes every release and catches
+nothing, and no single coverage figure shows that.
+
+Twelve of the thirteen signals are properties of the *traffic*: an error
+happened, a customer said the answer was bad, a latency was in the top five per
+cent. `novelty` is a property of the **dataset** — a record is novel when no case
+in the goldens file looks like it.
+
+Counting it makes the comparison circular. A window scored with `--existing`
+fires `novelty` on almost exactly the set of clusters the report is about to call
+uncovered, so the comparison would read "clusters the dataset does not cover are
+covered less often than the ones it does", which is true of every dataset ever
+assembled and says nothing about any of them.
+
+Found by running it: on the first recorded lifecycle the split came out 82
+signalled and 0 ordinary, `p = 1.000`, which is a comparison with one group in
+it. There is a test that re-scores a window against a goldens file and asserts
+the split does not move.
+
+## 65. Why `health` has no unhealthy exit code
+
+Every other command here uses its exit code to say something: 1 for a partial
+success, 2 for a run that produced nothing, 3 for a refusal. `health` returns 0
+whenever it wrote a report.
+
+The alternative is a threshold — coverage below some number exits 1 — and that
+threshold is a decision this stage does not make. Putting one in an exit code
+would make it, quietly, in a constant, for everybody who ever runs the command,
+and then a team would tune their dataset to a number somebody picked while
+writing a CLI.
+
+The report gives the counts, the share and the interval. What counts as healthy
+is an argument for the people who own the system.
+
+## 66. Why the demo windows are 120 records each and committed as data
+
+Phase B shipped a thirteen-line sample, which is enough to make every signal fire
+and not enough to demonstrate anything else. Clustering thirteen singletons
+proves nothing. A p95 needs twelve observations before stage 03 will compute one
+at all. A drift comparison needs two windows.
+
+So `logs/demo_window_a.jsonl` and `demo_window_b.jsonl` are 120 invented records
+each: twelve shared subjects with varied closing sentences so the cluster cap has
+something to do, eight classes of personal data planted once each, one order
+reference that is sixteen digits and fails Luhn so it must survive, four
+injection shapes, three refusal shapes, a Japanese message and a `hello?`.
+
+B is a week in which something broke — the error rate roughly quadruples and
+about a third of its subjects are new — because a drift stage demonstrated
+against two identical weeks is a drift stage nobody has seen work.
+
+They are committed as **data**, not as a generator. A file that is regenerated is
+a file whose diff is noise, and these are inputs to a recorded example rather
+than a fixture anybody should be editing. There is a test asserting every planted
+value is still there, so removing one fails the build rather than quietly
+weakening three other things.
+
+## 67. Why the recorded example shows `promote` failing
+
+`docs/examples/lifecycle.synthetic.md` runs all nine stages end to end and its
+`promote` step exits 3.
+
+That is the point. The lifecycle is a dry run, so its criteria are placeholders,
+so promotion is refused — and a transcript that showed placeholders being adopted
+would be a transcript demonstrating the exact thing the stage exists to prevent.
+The health step then runs against `goldens.handwritten.yaml`, four cases written
+by a person about the demo traffic, because a coverage figure measured against a
+file of placeholders is a dataset measuring itself.
+
+## 68. What running Phase C found that reasoning about it did not
+
+Four, and two of them are older than Phase C.
+
+**Three reports had never carried the SYNTHETIC banner.** `CONTEXT.md` has said
+since Phase A that a window built from an invented log says so on its own first
+line. `ingest.md` and `score.md` did it. `cluster.md`, `selection.md` and both
+drift reports did not — and `selection.md` is the file people paste into tickets,
+which made it the worst place in the repository to have missed it. Found by
+building the recorded example and reading the first line of every artefact before
+committing it. The fix threads the manifest's `synthetic` flag through four more
+reports; an unreadable manifest is treated as synthetic rather than as real,
+because a report that dropped its banner because a file would not parse is
+exactly the one somebody would quote as a measurement.
+
+**`promote` would adopt a dry-run placeholder.** The candidates file said "do not
+promote them" and nothing stopped it. Found the same way: by writing the example
+and noticing that the promoted goldens file was the one committed artefact with
+no banner on it — because a promoted case has no banner, and it should not have
+been promotable. §60.
+
+**The novelty circularity in stage 08.** §64. Found by reading a real report
+rather than by reasoning about the formula: 82 signalled clusters and 0 ordinary
+ones is a comparison with one group in it, and it took a run over 120 records to
+make that visible.
+
+**A CI check that passed by failing.** The step asserting a model id appears
+nowhere outside `config.py` was written as
+`grep -rn -F -- "$id" --include='*.toml' .`, which puts `--include` *after* `--`,
+so grep read each one as a filename, printed "No such file or directory",
+returned non-zero, and the `if` reported success. It also matched its own line in
+the workflow. Fixed by reading the id from `loghog.config` at runtime — so the
+workflow does not become the second place it appears, which is the thing it is
+checking for — and by using `-e` for the pattern. The lesson is that a check
+which can only pass is not a check, and the way to find out is to make it fail on
+purpose once.
+
+## 69. What Phase C does not claim
+
+- **There is still no live model call in this repository.** `loghog label`
+  without `--dry-run` was run once, on 2026-09-05, and refused for want of a
+  credential: `GEMINI_API_KEY is not set`, exit 3, which is project 1's own
+  message from `providers.gemini`. No `.env` exists here and this session was not
+  permitted to create one. Every criterion in `docs/examples/` is therefore a
+  `[SYNTHETIC]` placeholder, every one of those files says so on its first line,
+  and `promote` refuses all of them. When a live run happens it will be committed
+  as `*.live.*` with a LIVE banner beside the dry run, not instead of it.
+- **The drafting prompt has never been read by a model.** Its bytes are hashed
+  into every label row so that a reviewer can tell which wording produced a file,
+  and that hash has exactly one value so far. Whether these instructions produce
+  *good* criteria is a claim nobody here can make; what is tested is that a reply
+  which is not the agreed shape is refused.
+- **CI is configured and has still never run.** The workflow is committed and the
+  whole lifecycle job was extracted with PyYAML and executed locally against the
+  committed tree, including its clean-checkout assertion. GitHub has not run it,
+  because nothing has been pushed.
+- **The coverage and drift numbers in `docs/examples/` are about invented
+  traffic.** Six per cent coverage and a 3.3% → 13.3% error rate are arithmetic
+  over two files somebody wrote for the purpose. They demonstrate that the stages
+  compose and that the numbers move in the direction the data was built to move
+  them. They are not measurements of anything.
+- **Nothing here has been used to catch a real regression.** The tool produces a
+  dataset in project 1's schema and a test proves project 1's loader accepts it.
+  Whether a dataset mined this way finds regressions a hand-written one misses is
+  the question the whole series is pointed at, and it needs a system, a quarter,
+  and somebody's real traffic.

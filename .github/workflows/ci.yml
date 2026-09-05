@@ -1,11 +1,21 @@
 # Everything this repository can prove without a key.
 #
-# There are no secrets here and no `secrets.*` reference anywhere in the file,
-# and unlike the sibling repositories in this series that is not a compromise —
-# it is the whole shape of the six stages that exist. Ingestion, redaction,
-# scoring, clustering, selection and drift are all mechanical, and mechanical
-# work is deterministic code. Nothing in this repository has ever called a model.
-# The first stage that will is `06_label`, and it is PLANNED.
+# There are no secrets here and no `secrets.*` reference anywhere in the file.
+# Eight of the nine stages are mechanical — ingestion, redaction, scoring,
+# clustering, selection, emission, health and drift are all deterministic code —
+# and the ninth, `06_label`, only ever runs in CI with `--dry-run`, which calls
+# nothing.
+#
+# That is a deliberate choice rather than a limitation. A scheduled job holding a
+# key would spend somebody's quota on every push and would eventually record a
+# "live" number nobody chose to buy.
+#
+# The dataset half of the pipeline — label, emit, promote, health, drift — lives
+# in `dataset.yml`, because this file had grown past the four-hundred-line limit
+# every committed source file here keeps, and because the two jobs answer
+# different questions: this one asks whether a log becomes a window without
+# leaking anything, and that one asks whether a window becomes a dataset project
+# 1 will load.
 #
 # The action SHAs are pinned and were copied from project 1's workflow, which is
 # where they were first read. A tag is a moving reference, and an action that
@@ -19,7 +29,8 @@
 #   privacy    the redactor, from a shell, against the committed sample — and
 #              then a grep over the window it wrote for the things that must not
 #              be in it and the things that must
-#   lifecycle  ingest -> append -> window show, on a COPY of the repository
+#   lifecycle  ingest -> append -> score -> cluster -> select -> drift, on a
+#              COPY of the repository
 #
 # The privacy job is the one worth having. Unit tests prove the detectors; this
 # proves that a window written by the real command line, through the real
@@ -38,7 +49,7 @@ permissions:
 
 jobs:
   checks:
-    name: lint, tests, privacy, offline lifecycle, analysis
+    name: lint, tests, privacy, offline lifecycle
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -262,6 +273,7 @@ jobs:
 
           echo "--- the shortlist DOES carry the case, because stage 06 needs it ---"
           grep -qF 'recycling bin' "$demo/selected/judged/candidates.jsonl"
+
 
           # `git status --porcelain` is the load-bearing check because it sees
           # untracked files too — a stage that wrote a brand-new records/ into

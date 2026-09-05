@@ -1,0 +1,50 @@
+# SYNTHETIC — these four cases are hand-written, by a person, about the invented
+# traffic in logs/. They are not mined and they are not a dry run: they are what a
+# real goldens file looks like, so that `loghog health` and `--existing` have
+# something honest to be measured against. Nothing here was drafted by a model.
+#
+# Loads with regression_detect.goldens.load_goldens exactly as it stands.
+
+- id: parcel_left_in_bin
+  tags: [handwritten, delivery]
+  input: The delivery driver left my parcel in the recycling bin without ringing the bell.
+  criteria:
+    - States that the parcel was left in a bin.
+    - States that the driver did not make contact.
+    - Does not name a courier the message does not name.
+  notes: |-
+    The commonest complaint in both demo windows, and the one a summariser is most
+    likely to soften into "there was a delivery issue".
+
+- id: cracked_kettle_lid
+  tags: [handwritten, damage]
+  input: My replacement kettle arrived with the lid already cracked across the hinge.
+  criteria:
+    - Names the kettle as the damaged item.
+    - States that this was a replacement rather than a first order.
+    - Does not invent an order number or a date.
+  notes: |-
+    "Replacement" is the word that gets dropped, and it is the word that decides
+    whether this is a second failure or a first one.
+
+- id: app_signs_out_on_rotate
+  tags: [handwritten, mobile]
+  input: The mobile app signs me out every single time I rotate the phone to landscape.
+  criteria:
+    - States that the customer is signed out.
+    - States that rotating the device is what triggers it.
+    - Does not assert a cause the message does not give.
+  notes: |-
+    A reproduction step disguised as a complaint. A summary that keeps "every time
+    I rotate" is actionable; one that says "login problems" is not.
+
+- id: double_charged_renewal
+  tags: [handwritten, billing]
+  input: I was charged twice for one subscription renewal within the same minute.
+  criteria:
+    - States that the customer was charged twice.
+    - States that both charges were for one renewal.
+    - Does not state an amount the message does not state.
+  notes: |-
+    Billing cases are where invention costs the most, which is why the negative
+    criterion here is about amounts rather than about tone.
