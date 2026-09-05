@@ -1,0 +1,32 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.DS_Store
+.coverage
+htmlcov/
+
+# Anchored to the repository root on purpose. An unanchored `records/` would be
+# harmless today, but the same mistake with a directory that shares a name with
+# a source package would silently leave code out of every commit, and anchoring
+# everything here keeps that class of bug impossible.
+#
+# `records/` holds the windows, and a window is production text. That is not an
+# accident of the design — it is the design: an eval case IS the thing the
+# customer wrote, and you cannot build a dataset out of text nobody kept. So the
+# text is kept, redacted before it is written, mode 0600 under a 0700 directory,
+# and never committed. This one line is the difference between a tool that
+# handles personal data carefully and a repository that publishes it.
+/records/
+
+# Per-run artifacts from anything later. Nothing writes here in Phase A; the
+# rule is here so that the first stage that wants a scratch directory finds one
+# already ignored rather than adding it to a commit and then to a .gitignore.
+/runs/
+
+# NOT ignored, on purpose: /mappings/ and /samples/. A mapping is the record of
+# how somebody's log was interpreted, and a window whose mapping is not in the
+# repository is a window nobody can reproduce. The samples are invented and say
+# so on the first line of their own README.

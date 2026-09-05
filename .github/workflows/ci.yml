@@ -1,0 +1,169 @@
+# Everything this repository can prove without a key.
+#
+# There are no secrets here and no `secrets.*` reference anywhere in the file,
+# and unlike the sibling repositories in this series that is not a compromise —
+# it is the whole shape of Phase A. Stages 01 and 02 are ingestion and
+# redaction, both of which are mechanical, and mechanical work is deterministic
+# code. Nothing in this repository has ever called a model. The first stage that
+# will is `06_label`, and it is PLANNED.
+#
+# The action SHAs are pinned and were copied from project 1's workflow, which is
+# where they were first read. A tag is a moving reference, and an action that
+# changes under a pinned tag is a supply-chain problem in the one place a
+# repository executes somebody else's code.
+#
+# Four things are checked, in order of how fast they fail:
+#
+#   lint       ruff, at the line length pyproject.toml sets
+#   tests      the whole suite, none of which touches the network
+#   privacy    the redactor, from a shell, against the committed sample — and
+#              then a grep over the window it wrote for the things that must not
+#              be in it and the things that must
+#   lifecycle  ingest -> append -> window show, on a COPY of the repository
+#
+# The privacy job is the one worth having. Unit tests prove the detectors; this
+# proves that a window written by the real command line, through the real
+# configuration, does not contain an email address — which is the only claim
+# this repository actually makes.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, tests, privacy, offline lifecycle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Tests
+        run: uv run pytest -q
+
+      # A copy, not the checkout. Nothing here should ever write inside the
+      # repository, and the last step of this job asserts that it did not.
+      - name: The whole lifecycle, offline
+        run: |
+          set -euo pipefail
+          demo="$(mktemp -d)"
+          cp loghog.toml "$demo/"
+          cp -R mappings samples "$demo/"
+          loghog() { uv run loghog "$@" --config "$demo/loghog.toml"; }
+
+          echo "--- the built-in mappings load ---"
+          loghog mappings list
+
+          # `ingest` exits 1 on the sample, on purpose: two of its thirteen
+          # lines are broken by design. A run that returned 0 over them would be
+          # the failure this tool exists to prevent, so the code is captured and
+          # asserted rather than allowed to abort the job.
+          echo "--- ingest, which must exit 1 ---"
+          set +e
+          loghog ingest --input samples/support_chat.synthetic.jsonl \
+              --format jsonl --mapping openai_chat_jsonl \
+              --window demo --synthetic | tee "$demo/ingest.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          test "${code}" -eq 1 || {
+            echo "::error::ingest exited ${code}; the sample has two broken lines and must exit 1."
+            exit 1
+          }
+
+          echo "--- the second file, appended into the same window ---"
+          loghog ingest --input samples/support_tickets.synthetic.csv \
+              --format csv --mapping "$demo/samples/support_csv.toml" \
+              --window demo --append --synthetic
+
+          echo "--- re-ingesting the same file must be refused ---"
+          set +e
+          loghog ingest --input samples/support_chat.synthetic.jsonl \
+              --format jsonl --mapping openai_chat_jsonl \
+              --window demo --append 2> "$demo/refusal.txt"
+          refused=$?
+          set -e
+          test "${refused}" -eq 3 || {
+            echo "::error::re-ingesting an already-ingested file exited ${refused}, expected 3."
+            exit 1
+          }
+          grep -q "already been ingested" "$demo/refusal.txt"
+
+          loghog window show --window demo | tee "$demo/show.txt"
+
+          echo "--- the banners ---"
+          head -1 "$demo/ingest.txt" | grep -q '^SYNTHETIC'
+          head -1 "$demo/show.txt" | grep -q '^SYNTHETIC'
+          head -1 "$demo/records/demo/ingest.md" | grep -q '^SYNTHETIC'
+          head -1 samples/README.md | grep -q '^SYNTHETIC'
+
+          echo "--- what must NOT be in the window ---"
+          records="$demo/records/demo/records.jsonl"
+          for leaked in \
+              'susan.calvin@example.com' \
+              'kim.reyes@example.com' \
+              '4242 4242 4242 4242' \
+              '4111-1111-1111-1111' \
+              '123-45-6789' \
+              'GB33BUKB20201555555555' \
+              '192.168.1.14' \
+              '221B Baker Street'; do
+            if grep -qF "${leaked}" "${records}"; then
+              echo "::error::the window contains ${leaked}. Redaction did not hold."
+              exit 1
+            fi
+          done
+
+          echo "--- what MUST be in the window ---"
+          # The order reference fails Luhn and is the case; the allowlisted
+          # product is not a person. Losing either is a redactor that has
+          # destroyed the dataset to protect it.
+          grep -qF '1234567812345678' "${records}"
+          grep -qF '8899001122334455' "${records}"
+          grep -qF '9911-2233' "${records}"
+          grep -qF 'Dr Pepper' "${records}"
+          grep -qF '[EMAIL_1]' "${records}"
+          grep -qF 'app.example.com/users/[EMAIL_1]' "${records}"
+
+          echo "--- the error report names every rejected line and quotes none ---"
+          test "$(wc -l < "$demo/records/demo/errors.jsonl")" -ge 2
+          grep -q 'LineParseError' "$demo/records/demo/errors.jsonl"
+          grep -q 'RecordError' "$demo/records/demo/errors.jsonl"
+
+          echo "--- redact, from a shell, on text that never touches a file ---"
+          loghog redact --text "Dr Susan Calvin, sam@example.com, 4242 4242 4242 4242, order 1234567812345678" \
+              | tee "$demo/redact.txt"
+          grep -q '\[EMAIL_1\]' "$demo/redact.txt"
+          grep -q '\[CARD_1\]' "$demo/redact.txt"
+          grep -qF '1234567812345678' "$demo/redact.txt"
+
+          # `git status --porcelain` is the load-bearing check because it sees
+          # untracked files too — a stage that wrote a brand-new records/ into
+          # the checkout would leave `git diff` completely silent. `records/` is
+          # gitignored, so this also proves the ignore rule is anchored the way
+          # it claims to be.
+          echo "--- the checkout was not touched ---"
+          git status --porcelain
+          test -z "$(git status --porcelain)" || {
+            echo "::error::the lifecycle job wrote inside the checkout."
+            exit 1
+          }
+          test ! -d records || {
+            echo "::error::a records/ directory appeared in the checkout."
+            exit 1
+          }
+          echo "the checkout is clean"

@@ -1,0 +1,74 @@
+# Configuration for the log ingestion pipeline.
+#
+# Everything here has a consequence somebody should be able to argue with: where
+# a window is written, whether personal data leaves the machine inside an eval
+# case, and which Title Case pairs are products rather than people. None of it is
+# a literal in the ingestion code, so changing any of it is a diff a person
+# reviews rather than a code change somebody notices later.
+#
+# Model identifiers are deliberately absent, and so are secrets. Phase A calls no
+# model at all; when stage 06 arrives it will name a `model_ref` — the name of an
+# environment variable defined in `src/loghog/config.py` — and that module will
+# resolve it. Committed configuration therefore contains no vendor strings. Set
+# GEMINI_API_KEY in a .env file at the repository root; it is gitignored and
+# never appears in a log, an error message, or a record.
+
+[paths]
+# Relative to this file, never to the shell that started the run, and never
+# absolute: a committed path containing somebody's home directory is a path that
+# works on exactly one machine. Both are validated to stay inside the repository.
+#
+# `records_dir` is GITIGNORED. A window holds production text — that is what it
+# is for — and the whole argument of this repository is that such text is handled
+# carefully rather than committed.
+records_dir = "records"
+
+# Where a bare `--mapping openai_chat_jsonl` is resolved. Mappings are COMMITTED:
+# a mapping is the record of how a vendor's log was interpreted, and a window
+# whose mapping is not in the repository is a window nobody can reproduce.
+mappings_dir = "mappings"
+
+[privacy]
+# The default, and the one setting in this file that is a safety property rather
+# than a preference. While it is true, every text field passes through the
+# redactor before it reaches a file, and the writer re-checks the result: a
+# record still carrying an email address, a Luhn-valid card, an SSN, an IBAN or
+# an IP is refused rather than written.
+#
+# Setting it to false additionally requires `--allow-unredacted` on the command
+# line. Two switches, in two places, one of them typed by a human at the moment
+# of the decision — because "we turned redaction off for a debugging session six
+# months ago" is exactly how production text ends up in a repository.
+redact = true
+
+# Title Case pairs that follow an honorific but are not people. The name
+# heuristic is the only detector here that guesses, and this is the correction
+# for it. Entries are matched case-insensitively.
+#
+# These three are the ones the sample log needs. A real deployment's list is
+# mostly its own product names.
+name_allowlist = [
+    "Dr Pepper",
+    "Dr Martens",
+    "Mr Muscle",
+]
+
+[ingest]
+# The longest text this tool will carry in a single field, in characters.
+# Production logs contain pasted stack traces, whole email threads and the
+# occasional base64 image; a record like that is not an eval case, it is a
+# denial-of-service on every stage after this one. Over the limit the text is
+# truncated and the record records that it was.
+max_text_chars = 20000
+
+[dedupe]
+# Exact deduplication on the SHA-256 of the normalised REDACTED input.
+#
+# Redacted, not raw, and that is a real decision: two tickets identical except
+# for the customer's name collapse into one record. For an eval dataset that is
+# correct — they are one case — and it is also the only ordering that lets a
+# window be deduplicated without keeping the raw text around to compare.
+#
+# Turn it off to measure how much duplication a log actually has before deciding
+# what to do about it.
+dedupe = true

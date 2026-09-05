@@ -1,0 +1,72 @@
+[project]
+name = "loghog"
+version = "0.1.0"
+description = "Turn production logs into an evaluation dataset: ingest under a field mapping, redact the PII before anything is written, and keep a manifest that says what came from where."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Project 1 supplies the seams the later stages are built on: the `Provider`
+    # protocol and its typed error hierarchy, `gemini_provider_from_env`, the
+    # `FakeProvider`, the pacing helper, the criterion judge (`judge_criterion`,
+    # `parse_verdict`), the statistics (`fisher_exact_one_sided`,
+    # `wilson_interval`), the golden-case loader (`load_goldens`) and the target
+    # adapters (`Target`, `CommandTarget`, `HttpTarget`,
+    # `BuiltinSummarizerTarget`).
+    #
+    # Phase A — stages 01 and 02, the only stages built — calls NONE of it. Not
+    # one line here talks to a model, and that is the point: ingestion and
+    # redaction are mechanical, so they are code. The pin is declared now anyway
+    # so the dependency set a Phase A reader installs is the one Phase B runs
+    # against, and so that the schema this stage emits is checked against
+    # project 1's real loader rather than against a restatement of it.
+    #
+    # Pinned to a COMMIT, not a branch. A window's manifest names the code that
+    # produced it; a branch that moves underneath makes that name a guess.
+    "regression-detect @ git+https://github.com/DreadpiratePickles/regress@e41aa1b",
+    # Read by `loghog.config_file` and the mapping loader? No — both use the
+    # standard library's `tomllib`. `python-dotenv` is here because the runtime
+    # loads `.env` for the provider seam the later stages use, and a package
+    # that imports what it does not declare breaks the day the dependency tree
+    # changes shape.
+    "python-dotenv>=1.0.0",
+]
+
+# The console script every transcript in README.md is written against.
+# `scripts/loghog.py` stays as the no-install path — it inserts `src/` on
+# `sys.path` itself — but a documented `loghog ...` line has to be a command
+# that exists, and after `uv sync` this is the one that makes it exist.
+[project.scripts]
+loghog = "loghog.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# Required because `regression-detect` is a direct git reference rather than a
+# PyPI release. Project 1 is not published; pinning its commit is the only way
+# to make this package's dependency set reproducible.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/loghog"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# No `addopts = "-q"`. The documented command is `uv run pytest -q`, and a `-q`
+# here would be a second one: pytest counts quiet levels, and at two it drops
+# the `N passed` line the docs and the badge quote. The count is the point.

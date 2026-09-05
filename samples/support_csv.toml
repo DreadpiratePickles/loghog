@@ -1,0 +1,31 @@
+# The mapping for `support_tickets.synthetic.csv`, and the demonstration that a
+# mapping is a thing you write for your own log rather than a thing this tool
+# ships for you.
+#
+# It lives beside the sample rather than in `mappings/` on purpose: `mappings/`
+# holds the three mappings that are meant to be used against real systems, and
+# a fourth one for a five-row demonstration file would blur that line.
+#
+# Two things here are worth copying into a real CSV mapping.
+#
+# `naive_is_utc` is absent, so it defaults to false — and the sample's
+# timestamps carry a `Z` accordingly. A CSV export from a ticketing tool very
+# often does not, and the run will refuse it by name rather than assuming.
+#
+# Every value arrives as a string, because that is all a CSV has. `duration_ms`
+# is coerced to an integer at the boundary and a cell that is not a number is a
+# named failure on a numbered line, not a zero.
+
+schema_version = 1
+name = "support_csv"
+description = "The sample ticket export: flat columns, everything a string."
+source_format = "csv"
+
+[fields]
+record_id = { path = "ticket_id" }
+ts_utc = { path = "opened_at" }
+input_text = { path = "question" }
+output_text = { path = "answer" }
+arm = { path = "variant" }
+latency_ms = { path = "duration_ms" }
+feedback = { path = "rating" }

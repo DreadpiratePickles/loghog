@@ -1,0 +1,6 @@
+ticket_id,opened_at,question,answer,variant,duration_ms,rating
+tkt-001,2026-08-29T10:40:00Z,"The Tidepool board will not load for kim.reyes@example.com — she gets a spinner.","A colleague cannot load a shared board.",control,412,up
+tkt-002,2026-08-29T10:45:00Z,"Refund the duplicate charge on 4111-1111-1111-1111 for invoice 9911-2233.","The customer asks for a duplicate charge to be refunded.",candidate,509,
+tkt-003,2026-08-29T10:50:00Z,"Prof. Alan Turing at 10 Downing St says the courier never rang the bell.","A delivery was attempted without contacting the recipient.",control,388,down
+tkt-004,2026-08-29T10:55:00Z,"Order 8899001122334455 shipped to the wrong 7 Rue Lafayette address.","An order went to the wrong address.",candidate,441,
+tkt-005,2026-08-29T11:00:00Z,"Login from 10.0.0.1 keeps being flagged. Reachable on 020 7946 0958.","Logins from the customer's address are being flagged.",control,367,up

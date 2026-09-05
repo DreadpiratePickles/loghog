@@ -1,0 +1,47 @@
+# A hosted prompt-observability export, nested one level down.
+#
+# UNVERIFIED SHAPE. This mapping was written from a written specification of the
+# Prompton event shape, not from a real export anybody here has run. It is
+# committed because it is the useful *example* of the second thing a mapping has
+# to be able to do — reach into nested objects rather than read flat keys — and
+# because a two-mapping repository would make the mapping layer look like a
+# special case for one vendor.
+#
+# If your export differs, copy this file and edit the paths. That is exactly
+# what a mapping file is for, and it is a smaller change than it looks: every
+# line below is a dotted path, and nothing in the pipeline downstream of this
+# file knows or cares what the vendor called anything.
+#
+# The shape it expects:
+#
+#   {"event_id": "...", "timestamp": "2026-09-05T10:00:00Z",
+#    "generation": {"input": {"text": "..."}, "output": {"text": "..."},
+#                   "usage": {"input_tokens": 100, "output_tokens": 20},
+#                   "latency_ms": 412, "error": null},
+#    "prompt": {"version": "1.1.0"},
+#    "experiment": {"variant": "candidate"},
+#    "scores": [{"name": "is_concise", "value": true}],
+#    "feedback": {"rating": "up"}}
+
+schema_version = 1
+name = "prompton_events"
+description = "A nested hosted-observability event export. Shape unverified — see the header."
+source_format = "jsonl"
+
+[fields]
+record_id = { path = "event_id" }
+ts_utc = { path = "timestamp" }
+input_text = { path = "generation.input.text" }
+output_text = { path = "generation.output.text" }
+prompt_version = { path = "prompt.version" }
+arm = { path = "experiment.variant" }
+latency_ms = { path = "generation.latency_ms" }
+input_tokens = { path = "generation.usage.input_tokens" }
+output_tokens = { path = "generation.usage.output_tokens" }
+cost_micro_usd = { path = "generation.cost_micro_usd" }
+error = { path = "generation.error" }
+feedback = { path = "feedback.rating" }
+
+# Scores arrive as a list of named booleans under keys this vendor chose, which
+# is why the key names are part of the mapping rather than baked into the coercer.
+judge_verdicts = { path = "scores", criterion_key = "name", passed_key = "value" }

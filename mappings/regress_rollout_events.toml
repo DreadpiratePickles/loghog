@@ -1,0 +1,44 @@
+# The event log written by `regress-rollout`, this workspace's project 9.
+#
+#   https://github.com/DreadpiratePickles/regress-rollout
+#
+# One JSON object per served request, in `events/<flag>/<YYYY-MM-DD>.jsonl`.
+#
+# The interesting part of this mapping is what is NOT in the log. A rollout event
+# records `input_sha256` — the hash of the ticket — and not the ticket itself,
+# because its monitor never needs the input text and a log that stores less is a
+# log that leaks less. An eval case, though, *is* the input text. So this mapping
+# declares a [sidecar]: pass the traffic file the rollout was served from, and
+# ingestion rejoins the two halves by hash.
+#
+#   loghog ingest --input events/summarizer-1.1/2026-09-04.jsonl \
+#                 --format jsonl --mapping regress_rollout_events \
+#                 --sidecar traffic/tickets_v1.jsonl
+#
+# Without `--sidecar` the run refuses, by name, rather than failing every line
+# for a missing `input_text` and leaving the operator to work out why.
+
+schema_version = 1
+name = "regress_rollout_events"
+description = "regress-rollout served events, with the ticket text rejoined by hash."
+source_format = "jsonl"
+
+[fields]
+record_id = { path = "request_id" }
+ts_utc = { path = "ts_utc" }
+output_text = { path = "output_text" }
+prompt_version = { path = "prompt_label" }
+arm = { path = "arm" }
+latency_ms = { path = "latency_ms" }
+input_tokens = { path = "input_tokens" }
+output_tokens = { path = "output_tokens" }
+cost_micro_usd = { path = "cost_micro_usd" }
+error = { path = "error_type" }
+feedback = { path = "feedback" }
+
+[sidecar]
+# The event's `input_sha256` is the SHA-256 of the traffic line's `text`, so the
+# traffic file is indexed by the hash of that field and looked up by this one.
+key_field = "input_sha256"
+text_field = "text"
+target = "input_text"

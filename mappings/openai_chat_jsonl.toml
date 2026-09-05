@@ -1,0 +1,44 @@
+# A generic OpenAI-style chat-completion log, one JSON object per line.
+#
+# This is the shape almost everybody has, because it is what you get by logging
+# the request and the response of a chat API call side by side. It is also the
+# shape that most needs a mapping: the input is not a field, it is *the last
+# user turn of a conversation*, and no amount of dotted-path notation extracts
+# that. Hence `openai_last_user_message`, which is a named extractor rather than
+# a path.
+#
+# The conversation shape it reads:
+#
+#   {"id": "...", "created": 1788000000, "model": "...",
+#    "messages": [{"role": "system", ...}, {"role": "user", ...},
+#                 {"role": "assistant", ...}],
+#    "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+#    "latency_ms": 412}
+#
+# A line whose conversation has no assistant turn produces no output text, and
+# the record layer then refuses it unless the line also carries an `error`. That
+# is deliberate: a request that got no reply is a failure, and a failure with no
+# named cause is a row nobody can learn anything from.
+
+schema_version = 1
+name = "openai_chat_jsonl"
+description = "OpenAI-style chat completions: last user turn in, assistant turn out."
+source_format = "jsonl"
+
+[fields]
+# `created` is an epoch in seconds — unambiguous, so no [timestamp] section is
+# needed here.
+record_id = { path = "id" }
+ts_utc = { path = "created" }
+input_text = { path = "messages", extractor = "openai_last_user_message" }
+output_text = { path = "messages", extractor = "openai_assistant_message" }
+input_tokens = { path = "usage.prompt_tokens" }
+output_tokens = { path = "usage.completion_tokens" }
+latency_ms = { path = "latency_ms" }
+error = { path = "error" }
+feedback = { path = "feedback" }
+
+# Deliberately NOT mapped: `model`. The canonical record has no field for it,
+# because "which model produced this" is provenance about a whole window rather
+# than about one row — and a window that mixes two models is a window whose
+# comparisons are meaningless. Split the log first.
