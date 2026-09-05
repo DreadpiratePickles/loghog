@@ -7,13 +7,17 @@ inputs that stage declares.
 ## Stages
 
 The tool turns a production log into an evaluation dataset. Nine stages, one job
-each, and six of them are built. Everything built so far is deterministic: not
-one line of it calls a model. Turning a log line into a canonical record,
-stripping the personal data out of it, deciding which records are unusual and
-which are the same complaint twice — all of that is mechanical work, and
-mechanical work is code.
+each, and all nine are built.
 
-The one stage that will ever call a model is `06_label`, and it is PLANNED.
+Eight of them are deterministic, and that is the shape of the problem rather than
+a preference: turning a log line into a canonical record, stripping the personal
+data out of it, deciding which records are unusual and which are the same
+complaint twice — all of that is mechanical work, and mechanical work is code.
+
+The ninth is `06_label`, the one stage that calls a model, and it makes **exactly
+one bounded call per selected candidate**. Nothing it produces is adopted:
+`07_emit` writes drafts, and `loghog promote` is the only command in the
+repository that puts a case in a goldens file, for an id a named human typed.
 
 | Stage | Job | Lives in | Built? |
 |---|---|---|---|
@@ -22,9 +26,9 @@ The one stage that will ever call a model is `06_label`, and it is PLANNED.
 | `03_score` | Score every record against thirteen signals, each explainable: judge failures, disagreements, negative feedback, outliers, refusals, injection attempts | `stages/03_score/CONTEXT.md`, `src/loghog/score/` | Yes — Phase B |
 | `04_cluster` | Group near-duplicates so that twenty-five tickets about one bug become one case rather than twenty-five | `stages/04_cluster/CONTEXT.md`, `src/loghog/cluster/` | Yes — Phase B |
 | `05_select` | Choose the set: highest signal, one per cluster, and *stratified* so the dataset is not all of one failure | `stages/05_select/CONTEXT.md`, `src/loghog/select/` | Yes — Phase B |
-| `06_label` | The one stage that calls a model: draft checkable criteria for each selected record. One bounded call per record | `stages/06_label/CONTEXT.md` | PLANNED |
-| `07_emit` | Write the dataset in project 1's golden-case schema, as **drafts**, for a named human to promote | `stages/07_emit/CONTEXT.md` | PLANNED |
-| `08_health` | Report on the dataset itself: coverage and staleness of the goldens against the traffic they came from | `stages/08_health/CONTEXT.md` | PLANNED |
+| `06_label` | The one stage that calls a model: draft checkable criteria for each selected record. One bounded call per record | `stages/06_label/CONTEXT.md`, `src/loghog/label/` | Yes — Phase C |
+| `07_emit` | Write the dataset in project 1's golden-case schema, as **drafts**, for a named human to promote | `stages/07_emit/CONTEXT.md`, `src/loghog/emit/` | Yes — Phase C |
+| `08_health` | Report on the dataset itself: coverage and staleness of the goldens against the traffic they came from | `stages/08_health/CONTEXT.md`, `src/loghog/health/` | Yes — Phase C |
 | `09_drift` | Compare two windows: signal rates, subjects the older one never saw, input length, error rates with intervals | `stages/09_drift/CONTEXT.md`, `src/loghog/drift/` | Yes — Phase B |
 
 Stage 02 is not a stage you can skip or run afterwards. It runs *inside* stage
@@ -32,8 +36,12 @@ Stage 02 is not a stage you can skip or run afterwards. It runs *inside* stage
 re-checks its output. That ordering is the whole privacy design: there is no
 moment at which unredacted production text exists in a file.
 
-Stage 06 is the only stage that will ever leave the machine, and when it exists
-it will make exactly one bounded call per selected record.
+Stage 06 is the only stage that leaves the machine, and it makes exactly one
+bounded call per selected candidate. `--dry-run` makes none at all, writes a
+fixed placeholder list, and every file it touches says `SYNTHETIC` on its own
+first line — including the emitted dataset, which `promote` then refuses to
+adopt. A tool that prints "do not promote these" and then promotes them has
+taught its operator that its warnings are decorative.
 
 Stage 09 is numbered last because it is out of the pipeline rather than at the
 end of it. It is a question a person asks about two windows — has the traffic
@@ -41,8 +49,13 @@ moved? — and it needs no goldens file, no shortlist and no model. Stage 08 ask
 the neighbouring question, is the *dataset* still about the system, and needs the
 goldens that stage 09 does not.
 
-The pipeline is four commands in order: `ingest`, `score`, `cluster`, `select`.
-Each refuses to run before its predecessor and names the command that fixes it.
+The pipeline is six commands in order: `ingest`, `score`, `cluster`, `select`,
+`label`, `emit`. Each refuses to run before its predecessor and names the command
+that fixes it. `promote` is the seventh and is not part of the pipeline — it is
+the gate at the end of it, and it takes a person's name.
+
+`health` and `drift` are questions somebody asks about what the pipeline
+produced, and neither is a step in it.
 
 ## Shared resources
 
@@ -67,7 +80,14 @@ Each refuses to run before its predecessor and names the command that fixes it.
 | `records/<window>/cluster.md` | 4 | The shape of the partition, and nothing from inside it |
 | `selected/<window>/candidates.jsonl` | 4 | The shortlist, carrying the redacted case because stage 06 needs it. Gitignored |
 | `selected/<window>/selection.md` | 4 | Every cap and the count it refused. Carries no case text |
+| `selected/<window>/labels.jsonl` | 4 | The drafted criteria, beside the candidates they were drafted from. Gitignored |
+| `selected/<window>/label.md` | 4 | The labelling run's accounting: calls, model, prompt hash, failures. No case text |
+| `goldens/candidates-<window>.yaml` | 4 | The drafted dataset, in project 1's schema. Carries the redacted case, because a golden case IS the case. Gitignored |
+| `goldens/review-<window>.md` | 4 | What a person reads: each case, its criteria as unticked boxes, one Accept / Edit / Reject line. Gitignored |
+| `health/<window>.{md,json}` | 4 | Coverage, staleness, gaps and redundancy. Carries no text from either side |
 | `drift/<a>-vs-<b>.{md,json}` | 4 | Two windows compared. Carries no text from either |
+| `logs/*.jsonl` | 3 | Two invented 120-record demo windows. **Committed**, and the directory's README says SYNTHETIC on its first line |
+| `docs/examples/*.synthetic.*` | 3 | One recorded end-to-end run, banner-first, plus the artefacts it produced |
 
 ## Reused from project 1
 
@@ -76,8 +96,9 @@ Phase A called none of it, deliberately: ingestion and redaction are mechanical,
 so they are code, and a dependency imported to look busy is worse than one that
 is not imported yet.
 
-**Phase B calls two seams of it, and both for the same reason** — the alternative
-was a second implementation of something project 1 already owns:
+**Phases B and C call six seams of it**, and every one of them for the same
+reason: the alternative was a second implementation of something project 1
+already owns.
 
 - `goldens.load_goldens` and `GoldenDatasetError`, behind `--existing` on
   `loghog score` and `loghog select`. A goldens file is checked by *loading it
@@ -87,27 +108,30 @@ was a second implementation of something project 1 already owns:
   two copies of one formula is a disagreement waiting to happen in the one place
   nobody would think to look. A test asserts the imported name is project 1's
   own function object rather than a lookalike.
+- **the provider seam** — `providers.base` (the `Provider` protocol and its typed
+  error hierarchy) and `providers.gemini.gemini_provider_from_env`, for stage 06.
+  Nothing outside `cli_label.py` learns that a vendor exists.
+- **pacing** — `pacing.pace` and `pacing.validate_interval`, for spreading stage
+  06's calls under a per-minute quota. A dry run paces at zero.
+- **`compare.fisher_exact_one_sided`**, for stage 08's comparison of coverage on
+  the interesting traffic against coverage on the ordinary traffic.
+- **the golden-case schema** — `goldens.load_goldens` a third time, and this is
+  the one that matters most: stage 07's *output* must load with it. Checked by
+  calling it, in the tests and again in CI, rather than by restating a schema
+  here that would drift.
 
-What the remaining stages will take:
+One seam is deliberately still unused. **`judge.criterion.judge_criterion` is not
+called anywhere**, and stage 03 does not call it even though it could: all
+thirteen of its signals are deterministic, and a window whose records arrived
+without verdicts is reported as such rather than judged into having some. Stage
+06 does not call it either, because drafting criteria and grading against them
+are different questions and only the first one belongs here.
 
-- **the provider seam** — `providers.base` (the `Provider` protocol and the typed
-  error hierarchy), `providers.gemini.gemini_provider_from_env`, and
-  `providers.fake.FakeProvider`, for stage 06;
-- **pacing** — `pacing.pace`, for spreading stage 06's calls under a per-minute
-  quota;
-- **the criterion judge** — `judge.criterion.judge_criterion` and
-  `parse_verdict`. Stage 03 as built does **not** call it: every one of its
-  thirteen signals is deterministic, and a window whose records arrived without
-  verdicts is reported as such rather than judged into having some. Judging
-  unverdicted records is stage 06's business, where the call is bounded and
-  budgeted;
-- **the rest of the statistics** — `compare.fisher_exact_one_sided`, for stage
-  08's comparisons of one coverage figure against another;
-- **the golden-case schema** — `goldens.load_goldens` again, which stage 07's
-  *output* must load with, checked by calling it rather than by restating it;
-- **the target adapters** — `target.adapters` (`Target`, `CommandTarget`,
-  `HttpTarget`, `BuiltinSummarizerTarget`), so that a dataset mined here can be
-  replayed against the system it came from.
+**`target.adapters`** (`Target`, `CommandTarget`, `HttpTarget`,
+`BuiltinSummarizerTarget`) is the other one, and it is what a tenth stage would
+use to replay a mined dataset against the system it came from. There is no such
+stage, and a dependency imported to look busy is worse than one that is not
+imported yet.
 
 Pinned to a **commit**, not a branch. A window's manifest names the code that
 produced it, and a branch that moves underneath makes that name a guess.
@@ -178,3 +202,23 @@ is not a dependency on their code.
   window *and* of the interpreter's hash seed.
 - **A stage refuses to run before its predecessor**, by name, with the command
   that fixes it — never by quietly treating the missing input as empty.
+- **Exactly one model call per judgement, and the budget refuses rather than
+  truncating.** More candidates than `[label] max_calls` stops the run before the
+  first call. Labelling a prefix would produce a dataset whose contents depend on
+  where a budget ran out, and would spend real money doing it.
+- **Model output is untrusted input.** The reply is parsed strictly; a failure is
+  a recorded row with its error type, never an empty criteria list, and never a
+  placeholder. The case travels in delimiters inside the user message and never
+  in the system prompt.
+- **Nothing is adopted without a name.** `promote` is the only command that
+  writes into a goldens file. It needs `--reviewed-by`, it takes ids one at a
+  time, there is no `--all`, and it refuses any case still carrying the
+  `[SYNTHETIC]` marker.
+- **A promotion that would break the target writes nothing.** The appended file
+  is re-loaded with `load_goldens` before it replaces anything, and the append is
+  textual so a goldens file's comments — half its content — survive.
+- **Two files carry the case on purpose**, and it is always the redacted case:
+  the emitted dataset, because a golden case *is* the case, and the review
+  document, because a review of criteria without the case they came from is a
+  spelling check. Every other file this tool writes carries counts, ids,
+  thresholds and named patterns.

@@ -5,10 +5,11 @@ ignored, because the failure mode of a tolerant loader is the one that matters
 here: `redakt = false` would be silently ignored and the operator would believe
 redaction was off when it was on, or — far worse — the reverse.
 
-The four Phase B sections validate themselves. `[score]` knows the vocabulary of
+The six analysis sections validate themselves. `[score]` knows the vocabulary of
 signals, `[cluster]` knows that bands must divide permutations, `[select]` knows
-the strata: each is the section's own business and none of it belongs in a
-generic loader that would have to import all four to know any of it.
+the strata, `[label]` knows which model references `config.py` defines: each is
+the section's own business and none of it belongs in a generic loader that would
+have to import all six to know any of it.
 """
 
 import tomllib
@@ -26,19 +27,32 @@ from loghog.config_values import (
 )
 from loghog.drift.settings import DRIFT_KEYS, DriftSettings, load_drift_settings
 from loghog.errors import ConfigFileError
+from loghog.health.settings import HEALTH_KEYS, HealthSettings, load_health_settings
+from loghog.label.settings import LABEL_KEYS, LabelSettings, load_label_settings
 from loghog.score.settings import SCORE_KEYS, ScoreSettings, load_score_settings
 from loghog.select.settings import SELECT_KEYS, SelectSettings, load_select_settings
 
 DEFAULT_CONFIG_NAME = "loghog.toml"
 
 SCHEMA: dict[str, frozenset[str]] = {
-    "paths": frozenset({"records_dir", "mappings_dir", "selected_dir", "drift_dir"}),
+    "paths": frozenset(
+        {
+            "records_dir",
+            "mappings_dir",
+            "selected_dir",
+            "drift_dir",
+            "goldens_dir",
+            "health_dir",
+        }
+    ),
     "privacy": frozenset({"redact", "name_allowlist"}),
     "ingest": frozenset({"max_text_chars"}),
     "dedupe": frozenset({"dedupe"}),
     "score": SCORE_KEYS,
     "cluster": CLUSTER_KEYS,
     "select": SELECT_KEYS,
+    "label": LABEL_KEYS,
+    "health": HEALTH_KEYS,
     "drift": DRIFT_KEYS,
 }
 
@@ -57,6 +71,8 @@ class LoghogConfig:
     mappings_dir: Path
     selected_dir: Path
     drift_dir: Path
+    goldens_dir: Path
+    health_dir: Path
     redact: bool
     name_allowlist: tuple[str, ...]
     max_text_chars: int
@@ -64,6 +80,8 @@ class LoghogConfig:
     score: ScoreSettings
     cluster: ClusterParams
     select: SelectSettings
+    label: LabelSettings
+    health: HealthSettings
     drift: DriftSettings
 
 
@@ -108,6 +126,8 @@ def load_config(path: Path) -> LoghogConfig:
         mappings_dir=resolve_path(paths, "mappings_dir", root=root),
         selected_dir=resolve_path(paths, "selected_dir", root=root),
         drift_dir=resolve_path(paths, "drift_dir", root=root),
+        goldens_dir=resolve_path(paths, "goldens_dir", root=root),
+        health_dir=resolve_path(paths, "health_dir", root=root),
         redact=require_bool(privacy, "redact"),
         name_allowlist=require_string_list(privacy, "name_allowlist"),
         max_text_chars=require_positive_int(ingest, "max_text_chars"),
@@ -115,6 +135,8 @@ def load_config(path: Path) -> LoghogConfig:
         score=load_score_settings(_section(raw, "score", path)),
         cluster=load_cluster_settings(_section(raw, "cluster", path)),
         select=load_select_settings(_section(raw, "select", path)),
+        label=load_label_settings(_section(raw, "label", path)),
+        health=load_health_settings(_section(raw, "health", path)),
         drift=load_drift_settings(_section(raw, "drift", path)),
     )
 

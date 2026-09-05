@@ -83,7 +83,7 @@ def test_the_json_carries_every_section_the_markdown_does(tmp_path):
     payload = json.loads((config.drift_dir / "old-vs-new.json").read_text(encoding="utf-8"))
     assert sorted(payload) == [
         "cluster_novelty", "earlier", "input_length", "later", "loghog_version",
-        "rates", "schema_version", "signal_rates",
+        "rates", "schema_version", "signal_rates", "synthetic",
     ]
 
 

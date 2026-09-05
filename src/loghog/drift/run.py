@@ -27,7 +27,7 @@ from loghog.cluster.shingles import jaccard, shingles
 from loghog.config_file import LoghogConfig
 from loghog.drift.report import render_drift_report
 from loghog.drift.stats import RateComparison, compare_rates, ks_statistic, median
-from loghog.errors import AnalysisError, DriftError
+from loghog.errors import AnalysisError, DriftError, ManifestError
 from loghog.record import Record
 from loghog.score.settings import SIGNAL_NAMES
 from loghog.window.artifacts import read_clusters, read_jsonl, write_json, write_text
@@ -105,6 +105,7 @@ class DriftOutcome:
     novelty: ClusterNovelty
     input_length: LengthShift
     rates: dict[str, RateComparison]
+    synthetic: bool
     markdown_path: Path
     json_path: Path
 
@@ -123,6 +124,7 @@ class DriftOutcome:
                 name: comparison.to_json_dict()
                 for name, comparison in sorted(self.signal_rates.items())
             },
+            "synthetic": self.synthetic,
         }
 
 
@@ -140,8 +142,8 @@ def drift_report(
         raise DriftError(
             f"comparing window {earlier!r} with itself measures nothing. Name two windows."
         )
-    old_records, old_signals = _window(config, earlier)
-    new_records, new_signals = _window(config, later)
+    old_records, old_signals, old_synthetic = _window(config, earlier)
+    new_records, new_signals, new_synthetic = _window(config, later)
 
     signal_rates = {
         name: compare_rates(
@@ -182,6 +184,10 @@ def drift_report(
         novelty=novelty,
         input_length=lengths,
         rates=rates,
+        # Either window being invented makes the comparison invented. A real
+        # window measured against a synthetic one is not a measurement of
+        # anything, and the banner is cheaper than the argument about it.
+        synthetic=old_synthetic or new_synthetic,
         markdown_path=directory / f"{earlier}-vs-{later}.md",
         json_path=directory / f"{earlier}-vs-{later}.json",
     )
@@ -190,8 +196,10 @@ def drift_report(
     return outcome
 
 
-def _window(config: LoghogConfig, window: str) -> tuple[list[Record], dict[str, tuple[str, ...]]]:
-    """One window's records and per-record signal names, or a named refusal."""
+def _window(
+    config: LoghogConfig, window: str
+) -> tuple[list[Record], dict[str, tuple[str, ...]], bool]:
+    """One window's records, per-record signal names and provenance — or a refusal."""
     store = WindowStore(config.records_dir / window)
     if not store.records_path.is_file():
         raise DriftError(
@@ -215,7 +223,11 @@ def _window(config: LoghogConfig, window: str) -> tuple[list[Record], dict[str, 
         signals[payload["record_id"]] = tuple(
             entry["name"] for entry in payload.get("signals", [])
         )
-    return records, signals
+    try:
+        synthetic = store.read_manifest().synthetic
+    except ManifestError:
+        synthetic = True
+    return records, signals, synthetic
 
 
 def _negative(records: list[Record], config: LoghogConfig) -> int:

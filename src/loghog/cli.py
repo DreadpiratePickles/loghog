@@ -33,7 +33,16 @@ somebody chose — no goldens file, a window too small for a percentile — stay
 import sys
 from argparse import ArgumentParser
 
-from loghog import __version__, cli_ingest, cli_inspect, cli_score, cli_select
+from loghog import (
+    __version__,
+    cli_emit,
+    cli_health,
+    cli_ingest,
+    cli_inspect,
+    cli_label,
+    cli_score,
+    cli_select,
+)
 from loghog.cli_common import EXIT_CANNOT_RUN
 
 
@@ -47,6 +56,9 @@ def build_parser() -> ArgumentParser:
     cli_ingest.add_parser(subparsers)
     cli_score.add_parsers(subparsers)
     cli_select.add_parsers(subparsers)
+    cli_label.add_parsers(subparsers)
+    cli_emit.add_parsers(subparsers)
+    cli_health.add_parsers(subparsers)
     cli_inspect.add_parsers(subparsers)
     return parser
 

@@ -1,6 +1,6 @@
 """Every way this package can fail, as a type a caller can branch on.
 
-Six categories, because there are exactly six things a caller does about a
+Seven categories, because there are exactly seven things a caller does about a
 failure:
 
 - `ConfigError` — the run cannot start. Fix the file and try again.
@@ -13,6 +13,8 @@ failure:
   written.
 - `AnalysisError` — the window read fine and does not hold what this stage
   needs. Run the earlier stage and try again.
+- `PromoteError` — the human gate said no. Not an absence and not a bug: a
+  refusal to adopt a case, which is the one decision this tool will not make.
 
 The distinction between `RecordError` and `SourceError` is load bearing: a bad
 line is counted and the run continues, a bad file stops it. Collapsing the two
@@ -182,3 +184,35 @@ class SelectionError(AnalysisError):
 
 class DriftError(AnalysisError):
     """Two windows cannot be compared: one of them is missing a stage's output."""
+
+
+class LabelError(AnalysisError):
+    """A shortlist cannot be labelled, or its labels cannot be read back.
+
+    Raised by stage 07 as well as stage 06, and deliberately: when `emit` finds
+    no `labels.jsonl`, the thing that is missing is the labels, and the command
+    that makes them is `loghog label`. An `EmitError` there would say the
+    emission failed when it never had anything to emit from.
+    """
+
+
+class EmitError(AnalysisError):
+    """A drafted case cannot be rendered as a golden case project 1 will load."""
+
+
+class HealthError(AnalysisError):
+    """A dataset cannot be checked against a window: one of the two is missing."""
+
+
+# --- the human gate ---------------------------------------------------------
+
+
+class PromoteError(LoghogError):
+    """A promotion was refused, and the message says exactly why.
+
+    Its own category rather than an `AnalysisError`, because nothing about it is
+    an absence a second command would fill. It is a refusal to *adopt* — the
+    same shape as `RedactionError`, which is a refusal to write. Both say no to
+    something the caller asked for, on purpose, and neither becomes possible by
+    running anything else first.
+    """

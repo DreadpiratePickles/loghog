@@ -29,12 +29,28 @@ htmlcov/
 /selected/
 /drift/
 
+# `goldens/` holds what `loghog emit` writes, and a drafted case IS the ticket:
+# the golden-case schema's `input` field is the redacted text a customer wrote.
+# `review-<window>.md` shows the same text on purpose, because a review of
+# criteria without the case they came from is a spelling check. Both are
+# therefore treated exactly like `records/` — the goldens file a person
+# eventually promotes INTO is wherever they point `--into`, which is their
+# repository's business rather than this one's.
+#
+# `health/` quotes nothing at all, but it is a per-run artefact about a window
+# that is itself ignored, and a coverage figure committed without the window it
+# was computed over is evidence of nothing.
+/goldens/
+/health/
+
 # Per-run artifacts from anything later. Nothing writes here in Phase A; the
 # rule is here so that the first stage that wants a scratch directory finds one
 # already ignored rather than adding it to a commit and then to a .gitignore.
 /runs/
 
-# NOT ignored, on purpose: /mappings/ and /samples/. A mapping is the record of
-# how somebody's log was interpreted, and a window whose mapping is not in the
-# repository is a window nobody can reproduce. The samples are invented and say
-# so on the first line of their own README.
+# NOT ignored, on purpose: /mappings/, /samples/ and /logs/. A mapping is the
+# record of how somebody's log was interpreted, and a window whose mapping is not
+# in the repository is a window nobody can reproduce. The samples and the two
+# demo windows are invented — every name, address and card number in them was
+# made up for the purpose — and each directory says so on the first line of its
+# own README.

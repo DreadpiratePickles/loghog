@@ -243,7 +243,17 @@ def test_the_candidates_file_is_written_at_the_records_permissions(tmp_path):
 
 
 def _with_zero_quotas(config):
+    """Zero every quota, and nothing outside `[select.quotas]`.
+
+    The table is bounded by the next section header rather than by the end of
+    the file: an unbounded substitution would also zero the integers in the
+    sections that follow, and `[label] max_calls = 0` is refused — so the test
+    would fail for a reason that has nothing to do with quotas.
+    """
     head, quotas = config.path.read_text(encoding="utf-8").split("[select.quotas]", 1)
-    quotas = re.sub(r"^([a-z_]+) = \d+$", r"\1 = 0", quotas, flags=re.MULTILINE)
-    config.path.write_text(head + "[select.quotas]" + quotas, encoding="utf-8")
+    table, marker, tail = quotas.partition("\n[")
+    table = re.sub(r"^([a-z_]+) = \d+$", r"\1 = 0", table, flags=re.MULTILINE)
+    config.path.write_text(
+        head + "[select.quotas]" + table + marker + tail, encoding="utf-8"
+    )
     return load_config(config.path)

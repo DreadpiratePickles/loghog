@@ -17,6 +17,7 @@ report deciding something.
 from typing import Any
 
 from loghog import __version__
+from loghog.ingest.report import SYNTHETIC_BANNER
 from loghog.score.settings import SIGNAL_NAMES
 
 
@@ -24,7 +25,10 @@ def render_drift_report(outcome: Any) -> str:
     """Render the human comparison of two windows."""
     novelty = outcome.novelty
     lengths = outcome.input_length
-    lines = [
+    lines: list[str] = []
+    if outcome.synthetic:
+        lines += [SYNTHETIC_BANNER, ""]
+    lines += [
         f"# Drift: `{outcome.earlier}` to `{outcome.later}`",
         "",
         f"loghog {__version__}. {lengths.earlier_n} record(s) in the earlier window, "

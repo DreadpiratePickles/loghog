@@ -6,12 +6,12 @@
 # a literal in the ingestion code, so changing any of it is a diff a person
 # reviews rather than a code change somebody notices later.
 #
-# Model identifiers are deliberately absent, and so are secrets. Phase A calls no
-# model at all; when stage 06 arrives it will name a `model_ref` — the name of an
-# environment variable defined in `src/loghog/config.py` — and that module will
-# resolve it. Committed configuration therefore contains no vendor strings. Set
-# GEMINI_API_KEY in a .env file at the repository root; it is gitignored and
-# never appears in a log, an error message, or a record.
+# Model identifiers are deliberately absent, and so are secrets. `[label]` names
+# a `model_ref` — the name of an environment variable defined in
+# `src/loghog/config.py` — and that module resolves it, so committed
+# configuration contains no vendor strings and a deployment has one variable to
+# override. Set GEMINI_API_KEY in a .env file at the repository root; it is
+# gitignored and never appears in a log, an error message, or a record.
 
 [paths]
 # Relative to this file, never to the shell that started the run, and never
@@ -34,6 +34,15 @@ mappings_dir = "mappings"
 # still the thing a customer wrote.
 selected_dir = "selected"
 drift_dir = "drift"
+
+# Where `loghog emit` writes the drafted golden cases and their review document,
+# and where `loghog health` writes its report. Both are GITIGNORED, and
+# `goldens_dir` is the one that matters: a drafted case carries the redacted text
+# of the ticket, because a golden case IS the ticket. The file a reviewer
+# promotes INTO is wherever they point `--into`, which is their repository's
+# business rather than this one's.
+goldens_dir = "goldens"
+health_dir = "health"
 
 [privacy]
 # The default, and the one setting in this file that is a safety property rather
@@ -188,6 +197,48 @@ length_outlier = 2
 non_ascii_ratio = 2
 tiny_input = 1
 ordinary = 6
+
+[label]
+# Stage 06, the one stage that calls a model. One bounded call per selected
+# candidate, drafting three to five checkable criteria — and nothing else, ever.
+
+# The name of the environment variable that carries the model id, NOT a model
+# id. `src/loghog/config.py` defines the references and resolves them; a vendor
+# string here is precisely what that module exists to prevent. An unknown
+# reference is refused when this file is read rather than when the first call is
+# priced.
+model_ref = "LOGHOG_LABEL_MODEL_ID"
+
+# The minimum gap between two calls, in milliseconds. Provider quotas are per
+# minute and bounded retries cannot ride out a window that long, so the burst is
+# paced rather than half of it coming back as rate-limit errors that are honestly
+# recorded and useless. 6500 keeps a run under ten calls a minute, which is where
+# the free tier of the cheapest model sits.
+min_interval_ms = 6500
+
+# The most calls one `loghog label` may make. It REFUSES rather than truncating:
+# a stage that quietly labelled the first hundred of a hundred and forty
+# candidates would produce a dataset whose contents depend on a number nobody was
+# shown. Lower `[select] max_candidates` or raise this, on purpose, in a diff.
+max_calls = 120
+
+[health]
+# Stage 08: is the dataset still about the system? A golden case and a cluster of
+# traffic are NEIGHBOURS when their inputs overlap this much.
+#
+# ONE threshold, not two. Coverage asks whether a cluster has a case near it and
+# staleness asks whether a case has traffic near it; they are the same relation
+# read from both ends, and two numbers would let one report say a cluster is
+# covered by a case that is itself stale against that cluster.
+#
+# Deliberately not `[cluster] jaccard_threshold` all the same: merging two
+# records into one case is a stricter claim than noticing a case is about the
+# same subject as some traffic.
+neighbour_jaccard = 0.6
+
+# How many uncovered clusters the report ranks as "mine these next". A list
+# longer than a person will act on this week is a list nobody reads.
+max_recommendations = 10
 
 [drift]
 # A cluster in the newer window is NEW when nothing in the older window is this

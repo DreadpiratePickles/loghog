@@ -26,7 +26,7 @@ from typing import Any
 
 from loghog.cluster.shingles import jaccard, shingles
 from loghog.config_file import LoghogConfig
-from loghog.errors import SelectionError
+from loghog.errors import ManifestError, SelectionError
 from loghog.record import Record
 from loghog.score.settings import SIGNAL_NAMES
 from loghog.select.report import render_selection_report
@@ -95,6 +95,7 @@ class SelectOutcome:
     considered: int
     max_candidates: int
     max_per_cluster: int
+    synthetic: bool
     exit_code: int
 
     @property
@@ -195,6 +196,7 @@ def select_candidates(
         considered=len(scored),
         max_candidates=cap,
         max_per_cluster=config.select.max_per_cluster,
+        synthetic=_synthetic(store),
         exit_code=_exit_code(selected, dropped),
     )
     write_jsonl(
@@ -276,6 +278,19 @@ def _already_held(
     mine = shingles(record.input_text, size=config.cluster.shingle_words)
     best = max((jaccard(mine, theirs) for theirs in golden_shingles), default=0.0)
     return best >= config.score.novelty_max_jaccard
+
+
+def _synthetic(store: WindowStore) -> bool:
+    """Whether this window was built from an invented log.
+
+    A window whose manifest cannot be read is not called real: a shortlist that
+    quietly dropped the banner because a file was unreadable is exactly the
+    shortlist somebody would quote as a measurement.
+    """
+    try:
+        return store.read_manifest().synthetic
+    except ManifestError:
+        return True
 
 
 def _count(counter: dict[str, int], key: str) -> None:

@@ -11,7 +11,8 @@ from pathlib import Path
 from loghog import __version__
 from loghog.cluster.run import ClusterOutcome, cluster_records
 from loghog.config_file import LoghogConfig
-from loghog.errors import ClusterError
+from loghog.errors import ClusterError, ManifestError
+from loghog.ingest.report import SYNTHETIC_BANNER
 from loghog.window.artifacts import read_scores, write_json, write_text
 from loghog.window.store import WindowStore
 
@@ -38,11 +39,29 @@ def cluster_window(
     scores = read_scores(store)
     outcome = cluster_records(records, scores=scores, params=config.cluster)
     write_json(store.clusters_path, outcome.to_json_dict(window=window))
-    write_text(store.cluster_report_path, render_cluster_report(window, outcome))
+    write_text(
+        store.cluster_report_path,
+        render_cluster_report(window, outcome, synthetic=_synthetic(store)),
+    )
     return outcome
 
 
-def render_cluster_report(window: str, outcome: ClusterOutcome) -> str:
+def _synthetic(store: WindowStore) -> bool:
+    """Whether this window was built from an invented log.
+
+    An unreadable manifest is treated as synthetic rather than as real: a
+    report that dropped its banner because a file could not be parsed is the
+    one somebody would quote as a measurement.
+    """
+    try:
+        return store.read_manifest().synthetic
+    except ManifestError:
+        return True
+
+
+def render_cluster_report(
+    window: str, outcome: ClusterOutcome, *, synthetic: bool = False
+) -> str:
     """`cluster.md`: the shape of the partition, and nothing from inside it.
 
     Two findings get their own sentence rather than being left for a reader to
@@ -55,7 +74,10 @@ def render_cluster_report(window: str, outcome: ClusterOutcome) -> str:
     sizes = [cluster.size for cluster in outcome.clusters]
     singletons = sum(1 for size in sizes if size == 1)
     total = sum(sizes)
-    lines = [
+    lines: list[str] = []
+    if synthetic:
+        lines += [SYNTHETIC_BANNER, ""]
+    lines += [
         f"# Clusters in window `{window}`",
         "",
         f"loghog {__version__}. {total} record(s) in {len(sizes)} cluster(s); "

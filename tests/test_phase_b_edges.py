@@ -94,9 +94,13 @@ def test_a_missing_weights_table_is_refused(tmp_path):
 def test_a_missing_quotas_table_is_refused(tmp_path):
     path = tmp_path / "loghog.toml"
     text = load_test_config(tmp_path).path.read_text(encoding="utf-8")
-    head, _ = text.split("[select.quotas]", 1)
-    rest = text.split("[drift]", 1)[1]
-    path.write_text(head + "[drift]" + rest, encoding="utf-8")
+    head, quotas = text.split("[select.quotas]", 1)
+    # Everything from the section that follows the quota table, whatever it is
+    # called. Naming the next section here would make this test fail the day a
+    # new one is added between them, which is a fact about the test rather than
+    # about the loader.
+    _, marker, rest = quotas.partition("\n[")
+    path.write_text(head + marker + rest, encoding="utf-8")
     with pytest.raises(ConfigFileError, match=r"\[select.quotas\] is missing"):
         load_config(path)
 

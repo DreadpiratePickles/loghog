@@ -10,12 +10,19 @@ counts, quotas, cluster ids and stratum names, and nothing a customer wrote.
 from typing import Any
 
 from loghog import __version__
+from loghog.ingest.report import SYNTHETIC_BANNER
 
 
 def render_selection_report(outcome: Any) -> str:
     """Render the human summary of one selection."""
     dropped_total = sum(outcome.dropped.values())
-    lines = [
+    lines: list[str] = []
+    if outcome.synthetic:
+        # Banner-first, exactly as `ingest.md`, `score.md` and `cluster.md` do
+        # it. This file was the one that forgot, and it is the one people paste
+        # into tickets — so it was the worst place in the repository to forget.
+        lines += [SYNTHETIC_BANNER, ""]
+    lines += [
         f"# Selection for window `{outcome.window}`",
         "",
         f"loghog {__version__}. {outcome.selected_count} candidate(s) chosen from "

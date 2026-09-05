@@ -10,7 +10,7 @@ anybody spends a model call deciding what to do about it.
 This stage is **out of the pipeline on purpose**. It is numbered last because it
 is not a step between 08 and anything; it is a question a person asks about two
 windows, and it needs no goldens file, no shortlist and no model. Stage 08
-(`08_health`, PLANNED) asks the neighbouring question — is the *dataset* still
+(`08_health`, BUILT) asks the neighbouring question — is the *dataset* still
 about the system? — and needs the goldens that this one does not.
 
 ## Inputs
