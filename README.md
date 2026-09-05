@@ -611,9 +611,10 @@ Read these before pointing it at anything real.
   reviewer can tell which wording produced a file, and that hash has exactly one value so far. Whether
   these instructions produce *good* criteria is a claim I cannot make. What is tested is that a reply
   which is not the agreed shape is refused.
-- **CI is configured and has never run.** The workflow is committed, and I extracted its whole lifecycle
-  job with PyYAML and ran it locally against the committed tree, including the clean-checkout assertion.
-  GitHub has not run it, because nothing has been pushed.
+- **CI is configured and has run green on GitHub.** The workflow is committed, and I extracted its whole
+  lifecycle job with PyYAML and ran it locally against the committed tree, including the clean-checkout
+  assertion. GitHub has now run it as well: four runs on `main`, the `ci` and `dataset` workflows on each
+  of the last two commits, [all four succeeded](https://github.com/DreadpiratePickles/loghog/actions).
 - **The numbers in `docs/examples/` are about invented traffic.** Seven per cent coverage and a 3.3% → 13.3%
   error rate are arithmetic over two files I wrote for the purpose. They demonstrate that the stages
   compose and that the numbers move in the direction the data was built to move them. They are not
@@ -679,7 +680,7 @@ that `promote` refuses a placeholder, and asserting at the end that the checkout
 | Deterministic stages | 8. The ninth makes one call per case |
 | Near-duplicate detection | precision **1.000**, recall **0.960**, measured against brute force |
 | Live model calls made | **0** — attempted once, refused for want of a key |
-| CI | configured, never run |
+| CI | configured, [**4 runs on GitHub Actions**, all succeeded](https://github.com/DreadpiratePickles/loghog/actions) |
 
 ## Licence
 

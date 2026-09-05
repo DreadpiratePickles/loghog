@@ -1102,10 +1102,11 @@ purpose once.
   and that hash has exactly one value so far. Whether these instructions produce
   *good* criteria is a claim nobody here can make; what is tested is that a reply
   which is not the agreed shape is refused.
-- **CI is configured and has still never run.** The workflow is committed and the
-  whole lifecycle job was extracted with PyYAML and executed locally against the
-  committed tree, including its clean-checkout assertion. GitHub has not run it,
-  because nothing has been pushed.
+- **CI is configured and has run green on GitHub.** The workflow is committed and
+  the whole lifecycle job was extracted with PyYAML and executed locally against
+  the committed tree, including its clean-checkout assertion. GitHub has now run
+  it as well: four runs on `main`, the `ci` and `dataset` workflows on each of the
+  last two commits, [all four succeeded](https://github.com/DreadpiratePickles/loghog/actions).
 - **The coverage and drift numbers in `docs/examples/` are about invented
   traffic.** Seven per cent coverage and a 3.3% → 13.3% error rate are arithmetic
   over two files somebody wrote for the purpose. They demonstrate that the stages
