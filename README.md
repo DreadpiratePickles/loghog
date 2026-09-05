@@ -613,8 +613,9 @@ Read these before pointing it at anything real.
   which is not the agreed shape is refused.
 - **CI is configured and has run green on GitHub.** The workflow is committed, and I extracted its whole
   lifecycle job with PyYAML and ran it locally against the committed tree, including the clean-checkout
-  assertion. GitHub has now run it as well: four runs on `main`, the `ci` and `dataset` workflows on each
-  of the last two commits, [all four succeeded](https://github.com/DreadpiratePickles/loghog/actions).
+  assertion. GitHub now runs both workflows — `ci` and `dataset` — on every push to `main`, and
+  [every run so far has succeeded](https://github.com/DreadpiratePickles/loghog/actions). What it has
+  still never done is make a live model call; the caveat above stands.
 - **The numbers in `docs/examples/` are about invented traffic.** Seven per cent coverage and a 3.3% → 13.3%
   error rate are arithmetic over two files I wrote for the purpose. They demonstrate that the stages
   compose and that the numbers move in the direction the data was built to move them. They are not
@@ -680,7 +681,7 @@ that `promote` refuses a placeholder, and asserting at the end that the checkout
 | Deterministic stages | 8. The ninth makes one call per case |
 | Near-duplicate detection | precision **1.000**, recall **0.960**, measured against brute force |
 | Live model calls made | **0** — attempted once, refused for want of a key |
-| CI | configured, [**4 runs on GitHub Actions**, all succeeded](https://github.com/DreadpiratePickles/loghog/actions) |
+| CI | configured; `ci` and `dataset` run on every push, [**all green** on GitHub Actions](https://github.com/DreadpiratePickles/loghog/actions) |
 
 ## Licence
 

@@ -1104,9 +1104,10 @@ purpose once.
   which is not the agreed shape is refused.
 - **CI is configured and has run green on GitHub.** The workflow is committed and
   the whole lifecycle job was extracted with PyYAML and executed locally against
-  the committed tree, including its clean-checkout assertion. GitHub has now run
-  it as well: four runs on `main`, the `ci` and `dataset` workflows on each of the
-  last two commits, [all four succeeded](https://github.com/DreadpiratePickles/loghog/actions).
+  the committed tree, including its clean-checkout assertion. GitHub now runs both
+  workflows — `ci` and `dataset` — on every push to `main`, and
+  [every run so far has succeeded](https://github.com/DreadpiratePickles/loghog/actions).
+  What it has still never done is make a live model call; the caveat above stands.
 - **The coverage and drift numbers in `docs/examples/` are about invented
   traffic.** Seven per cent coverage and a 3.3% → 13.3% error rate are arithmetic
   over two files somebody wrote for the purpose. They demonstrate that the stages
