@@ -1107,7 +1107,7 @@ purpose once.
   committed tree, including its clean-checkout assertion. GitHub has not run it,
   because nothing has been pushed.
 - **The coverage and drift numbers in `docs/examples/` are about invented
-  traffic.** Six per cent coverage and a 3.3% → 13.3% error rate are arithmetic
+  traffic.** Seven per cent coverage and a 3.3% → 13.3% error rate are arithmetic
   over two files somebody wrote for the purpose. They demonstrate that the stages
   compose and that the numbers move in the direction the data was built to move
   them. They are not measurements of anything.

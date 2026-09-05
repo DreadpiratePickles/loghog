@@ -72,6 +72,24 @@ def test_a_dry_run_never_asks_for_a_key(tmp_path, monkeypatch):
     assert cli(tmp_path, "label", "--window", "demo", "--dry-run") == 0
 
 
+def test_a_dry_run_never_reaches_the_provider_seam(tmp_path, monkeypatch):
+    """The explosive goes where a dry run would touch a provider if it did.
+
+    `label_window` calls whatever drafter it is handed, so handing *it* a
+    drafter that raises proves nothing about a dry run. The guarantee lives one
+    level up, in `cli_label._drafter`, which returns the synthetic drafter
+    without ever constructing a provider — so that construction is what is made
+    to raise here.
+    """
+
+    def explode(model_id):
+        raise AssertionError(f"a dry run built a provider for {model_id}")
+
+    monkeypatch.setattr("loghog.cli_label.gemini_provider_from_env", explode)
+    shortlisted(tmp_path)
+    assert cli(tmp_path, "label", "--window", "demo", "--dry-run") == 0
+
+
 def test_an_unselected_window_names_the_command_that_fixes_it(tmp_path, capsys):
     write_config(tmp_path)
     assert cli(tmp_path, "label", "--window", "nope", "--dry-run") == 3

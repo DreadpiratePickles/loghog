@@ -8,7 +8,7 @@
 
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![tests: 1139](https://img.shields.io/badge/tests-1139-brightgreen)](tests/)
+[![tests: 1141](https://img.shields.io/badge/tests-1141-brightgreen)](tests/)
 [![coverage: 99%](https://img.shields.io/badge/coverage-99%25-brightgreen)](#status)
 [![redaction: before the first write](https://img.shields.io/badge/redaction-before%20the%20first%20write-8a2be2)](#the-principle-nothing-unredacted-is-ever-written)
 [![model calls: 1 per case](https://img.shields.io/badge/model%20calls-1%20per%20case-8a2be2)](#the-one-model-call)
@@ -184,6 +184,12 @@ uv run loghog emit    --window 2026-08-24
 
 The whole transcript, with every exit code, is committed at
 [`docs/examples/lifecycle.synthetic.md`](docs/examples/lifecycle.synthetic.md). Here is the middle of it.
+
+It was recorded in a throwaway copy of the repository with `[dedupe] dedupe = false` set, so that the two
+windows keep their near-duplicates instead of collapsing them — which is what makes 120 records in and 120
+records out. The committed `loghog.toml` ships `dedupe = true`, so the commands above as written print
+`104 record(s) written, 16 deduplicated` and carry every later count down with them. Every number below is
+from the deduplication-off run; `docs/examples/lifecycle.synthetic.md` says the same thing at the top.
 
 ```
 SYNTHETIC — built from an invented sample log, not from production traffic. No customer wrote any of the text this window holds.
@@ -607,7 +613,7 @@ Read these before pointing it at anything real.
 - **CI is configured and has never run.** The workflow is committed, and I extracted its whole lifecycle
   job with PyYAML and ran it locally against the committed tree, including the clean-checkout assertion.
   GitHub has not run it, because nothing has been pushed.
-- **The numbers in `docs/examples/` are about invented traffic.** Six per cent coverage and a 3.3% → 13.3%
+- **The numbers in `docs/examples/` are about invented traffic.** Seven per cent coverage and a 3.3% → 13.3%
   error rate are arithmetic over two files I wrote for the purpose. They demonstrate that the stages
   compose and that the numbers move in the direction the data was built to move them. They are not
   measurements of anything.
@@ -645,14 +651,15 @@ Read these before pointing it at anything real.
 
 ```bash
 uv sync
-uv run pytest -q                        # 1139 tests, none touching the network
-uv run pytest -q --cov=src/loghog       # 99% of 3,810 statements
+uv run pytest -q                        # 1141 tests, none touching the network
+uv run pytest -q --cov=src/loghog       # 99% of 3,813 statements
 uv run ruff check .                      # line length 100
 ```
 
 The whole test suite runs offline. `--dry-run` substitutes a fixed placeholder list for the one stage that
-would otherwise make a call, and there is a test that hands stage 06 a drafter which raises if it is ever
-invoked.
+would otherwise make a call, and there is a test that replaces the provider constructor with one that
+raises and asserts `loghog label --dry-run` still exits 0 — the seam a dry run would touch if it touched
+anything.
 
 CI runs four things in order of how fast they fail: lint, the suite, a privacy job that ingests the
 committed samples through the real command line and greps the resulting window for the addresses that must
@@ -664,8 +671,8 @@ that `promote` refuses a placeholder, and asserting at the end that the checkout
 
 | | |
 |---|---|
-| Tests | **1139**, `uv run pytest -q`, none touching the network |
-| Coverage | **99%** of 3,810 statements, `uv run pytest -q --cov=src/loghog` |
+| Tests | **1141**, `uv run pytest -q`, none touching the network |
+| Coverage | **99%** of 3,813 statements, `uv run pytest -q --cov=src/loghog` |
 | Lint | `uv run ruff check .` clean, line length 100 |
 | Stages built | **9 of 9** |
 | Deterministic stages | 8. The ninth makes one call per case |

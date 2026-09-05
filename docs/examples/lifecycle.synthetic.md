@@ -33,7 +33,7 @@ are decorative. So the refusal is enforced: any case still carrying `[SYNTHETIC]
 is turned away by id, and exit 3 is what a dry run's output is worth.
 
 **`health` is honest about a nearly empty dataset.** Four hand-written cases
-against eighty-two clusters is six per cent coverage with a Wilson interval from
+against eighty-two clusters is seven per cent coverage with a Wilson interval from
 three to fifteen, and the report says so rather than rounding it into a verdict.
 The Fisher comparison of signalled against ordinary clusters comes back at
 p = 0.955 — there is no evidence the interesting traffic is covered worse, and

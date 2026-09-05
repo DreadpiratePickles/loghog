@@ -59,7 +59,7 @@ memory for the length of one run and is never written anywhere.
 
 ## Verify
 
-- `tests/test_privacy_detect.py` — 68 cases, every one of them something
+- `tests/test_privacy_detect.py` — 69 cases, every one of them something
   somebody actually types: an email inside a URL, a `mailto:`, an address in
   angle brackets, a Luhn-valid card beside a sixteen-digit order reference, a
   24-digit machine id containing a Luhn-valid window, an IP at the end of a

@@ -76,7 +76,11 @@ next to the candidate that provoked it.
 
 ## Verify
 
-- A dry run makes no network call, asserted by handing in a drafter that raises.
+- A dry run makes no network call, asserted at the seam where one would be
+  made: `cli_label._drafter` never constructs a provider under `--dry-run`, so
+  the test replaces `gemini_provider_from_env` with a function that raises and
+  requires `loghog label --dry-run` to exit 0. Handing `label_window` itself a
+  drafter that raises would prove nothing — it calls whatever it is given.
 - The call count equals the candidate count. Exactly.
 - A malformed reply is a typed failure with the record named, and never becomes
   an empty criteria list.

@@ -128,21 +128,23 @@ def test_the_call_count_equals_the_candidate_count_exactly(tmp_path):
     assert outcome.drafted == outcome.considered
 
 
-def test_a_dry_run_makes_no_network_call_at_all(tmp_path):
-    """Asserted by handing in a drafter that raises if it is called."""
+def test_a_dry_run_labels_every_candidate_with_the_placeholder_list(tmp_path):
+    """What a dry run leaves behind — not that it called nothing.
+
+    `label_window` calls whatever drafter it is handed, unconditionally, so
+    handing *it* a drafter that raises would prove only that this function is
+    obedient. The guarantee that a dry run reaches no provider lives one level
+    up in `cli_label._drafter`, and is asserted where it lives, by
+    `tests/test_cli_phase_c.py::test_a_dry_run_never_reaches_the_provider_seam`.
+    """
     config = prepared(tmp_path)
-
-    def explode(task):
-        raise AssertionError("a dry run called the provider")
-
     outcome = label_window(config, window="w", drafter=synthetic_drafter(), dry_run=True)
     assert outcome.dry_run
     assert outcome.model_id == DRY_RUN_MODEL_ID
+    assert outcome.calls == outcome.considered
     assert all(
         line.startswith(SYNTHETIC_MARKER) for label in outcome.labels for line in label.criteria
     )
-    with pytest.raises(AssertionError):
-        explode(None)
 
 
 def test_the_budget_refuses_rather_than_truncating(tmp_path):
