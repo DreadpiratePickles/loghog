@@ -21,6 +21,14 @@ htmlcov/
 # handles personal data carefully and a repository that publishes it.
 /records/
 
+# `selected/` holds the shortlist, and a candidate carries the redacted case —
+# which is still the thing a customer wrote, and the whole reason `records/` is
+# ignored. `drift/` holds only counts, rates and cluster ids and quotes nothing,
+# but it is a per-run artefact about a window that is itself ignored, and a
+# comparison committed without the windows it compares is evidence of nothing.
+/selected/
+/drift/
+
 # Per-run artifacts from anything later. Nothing writes here in Phase A; the
 # rule is here so that the first stage that wants a scratch directory finds one
 # already ignored rather than adding it to a commit and then to a .gitignore.

@@ -30,6 +30,10 @@ RECORDS_NAME = "records.jsonl"
 MANIFEST_NAME = "manifest.json"
 ERRORS_NAME = "errors.jsonl"
 REPORT_NAME = "ingest.md"
+SCORES_NAME = "scores.jsonl"
+SCORE_REPORT_NAME = "score.md"
+CLUSTERS_NAME = "clusters.json"
+CLUSTER_REPORT_NAME = "cluster.md"
 
 DIRECTORY_MODE = 0o700
 FILE_MODE = 0o600
@@ -58,6 +62,22 @@ class WindowStore:
     @property
     def report_path(self) -> Path:
         return self.directory / REPORT_NAME
+
+    @property
+    def scores_path(self) -> Path:
+        return self.directory / SCORES_NAME
+
+    @property
+    def score_report_path(self) -> Path:
+        return self.directory / SCORE_REPORT_NAME
+
+    @property
+    def clusters_path(self) -> Path:
+        return self.directory / CLUSTERS_NAME
+
+    @property
+    def cluster_report_path(self) -> Path:
+        return self.directory / CLUSTER_REPORT_NAME
 
     @property
     def exists(self) -> bool:
@@ -134,6 +154,24 @@ class WindowStore:
                     f"record {record.record_id!r} still carries {', '.join(leaked)} in "
                     f"{field_name} after redaction. Nothing was written."
                 )
+
+    def read_records(self) -> list[Record]:
+        """Every record in this window, validated on the way in.
+
+        A corrupt line stops the read rather than being skipped, for the same
+        reason `existing_fingerprints` does: a stage that silently scored nine
+        records out of ten would produce a coverage figure computed against a
+        denominator nobody can reconstruct.
+        """
+        if not self.records_path.is_file():
+            return []
+        records = []
+        with self.records_path.open("r", encoding="utf-8") as handle:
+            for raw in handle:
+                text = raw.strip()
+                if text:
+                    records.append(record_from_json_dict(json.loads(text)))
+        return records
 
     def existing_fingerprints(self) -> set[str]:
         """Every input fingerprint already in this window.

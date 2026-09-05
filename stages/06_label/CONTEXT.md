@@ -13,7 +13,7 @@ one bounded model call per record.
 
 | Path or source | Layer | Authority | Required | Relevant section |
 |---|---:|---|---:|---|
-| `records/<window>/selection.json` | 4 | Authoritative | Yes | `selected` |
+| `selected/<window>/candidates.jsonl` | 4 | Authoritative | Yes | One object per chosen case: `record_id`, `stratum`, `score`, `reasons`, `input_text`, `output_text` |
 | `records/<window>/records.jsonl` | 4 | Authoritative | Yes | `input_text`, `output_text` |
 | `src/loghog/config.py` | 3 | Authoritative | Yes | `LABEL_MODEL_REF` |
 | `.env` | — | Authoritative | Yes, for a live run | `GEMINI_API_KEY`, loaded by the runtime |

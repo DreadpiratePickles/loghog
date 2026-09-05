@@ -10,6 +10,7 @@ from argparse import ArgumentParser
 from pathlib import Path
 
 from loghog.config_file import DEFAULT_CONFIG_NAME, LoghogConfig, load_config
+from loghog.errors import ConfigError
 
 EXIT_CANNOT_RUN = 3
 """The run could not start, or could not finish for a reason that is not about
@@ -43,3 +44,31 @@ def render_class_counts(by_class: dict[str, int]) -> list[str]:
         return ["  (nothing)"]
     width = max(len(name) for name in by_class)
     return [f"  {name.ljust(width)}  {count}" for name, count in sorted(by_class.items())]
+
+
+def load_existing_inputs(path: Path | None) -> list[str] | None:
+    """The inputs of an existing goldens file, read with *project 1's* loader.
+
+    `--existing` names a golden dataset in project 1's schema, and this reads it
+    with `regression_detect.goldens.load_goldens` rather than with a restatement
+    of that schema here. Checking a file by loading it with the code that owns
+    it is the only check that cannot drift.
+
+    A file that will not load is a refusal rather than a skip. Losing the
+    comparison quietly would propose cases the dataset already holds and call
+    them novel, which is the failure this flag exists to prevent.
+
+    Raises:
+        ConfigError: the file is absent or project 1's loader rejects it.
+    """
+    if path is None:
+        return None
+    if not Path(path).is_file():
+        raise ConfigError(f"no goldens file at {path}")
+    from regression_detect.goldens import GoldenDatasetError, load_goldens
+
+    try:
+        cases = load_goldens(Path(path))
+    except GoldenDatasetError as exc:
+        raise ConfigError(f"{path} is not a golden dataset this build can read: {exc}") from exc
+    return [case.input for case in cases]

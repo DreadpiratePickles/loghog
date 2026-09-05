@@ -39,7 +39,7 @@ in `--mapping` produces a list rather than a file-not-found."""
 
 _TOP_LEVEL_KEYS = frozenset(
     {"schema_version", "name", "description", "source_format", "fields", "defaults",
-     "sidecar", "timestamp"}
+     "sidecar", "timestamp", "expect"}
 )
 _FIELD_SPEC_KEYS = frozenset({"path", "extractor", "criterion_key", "passed_key"})
 _SIDECAR_KEYS = frozenset({"key_field", "text_field", "target"})
@@ -88,6 +88,7 @@ class FieldMapping:
     defaults: dict[str, Any]
     sidecar: SidecarSpec | None
     naive_is_utc: bool
+    expect_output_json: bool
 
 
 def resolve_mapping(reference: str, *, mappings_dir: Path | None) -> FieldMapping:
@@ -140,6 +141,7 @@ def load_mapping(path: Path) -> FieldMapping:
     defaults = _read_defaults(raw.get("defaults", {}), where=path)
     sidecar = _read_sidecar(raw.get("sidecar"), where=path)
     naive_is_utc = _read_naive_flag(raw.get("timestamp", {}), where=path)
+    expect_output_json = _read_expect_flag(raw.get("expect", {}), where=path)
 
     supplied = set(fields) | set(defaults) | ({sidecar.target} if sidecar else set())
     absent = [field for field in REQUIRED_FIELDS if field not in supplied]
@@ -157,6 +159,7 @@ def load_mapping(path: Path) -> FieldMapping:
         defaults=defaults,
         sidecar=sidecar,
         naive_is_utc=naive_is_utc,
+        expect_output_json=expect_output_json,
     )
 
 
@@ -225,6 +228,25 @@ def _read_naive_flag(raw: Any, *, where: Path) -> bool:
     value = raw.get("naive_is_utc", False)
     if not isinstance(value, bool):
         raise MappingError(f"{where}: naive_is_utc must be true or false")
+    return value
+
+
+def _read_expect_flag(raw: Any, *, where: Path) -> bool:
+    """`[expect] output_json`: the one thing about a producer's output shape a
+    mapping declares.
+
+    It lives here rather than in `loghog.toml` because it is a fact about one
+    producer, and a window can hold several. It travels to the scorer in the
+    manifest, per source, which is why the manifest schema went to 2.
+    """
+    if not isinstance(raw, dict):
+        raise MappingError(f"{where}: [expect] must be a table")
+    _reject_unknown(
+        raw, allowed=frozenset({"output_json"}), what="key in [expect]", where=where
+    )
+    value = raw.get("output_json", False)
+    if not isinstance(value, bool):
+        raise MappingError(f"{where}: output_json must be true or false, got {value!r}")
     return value
 
 

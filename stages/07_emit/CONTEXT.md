@@ -13,7 +13,7 @@ golden set without a name attached.
 
 | Path or source | Layer | Authority | Required | Relevant section |
 |---|---:|---|---:|---|
-| `records/<window>/selection.json` | 4 | Authoritative | Yes | `selected` |
+| `selected/<window>/candidates.jsonl` | 4 | Authoritative | Yes | One object per chosen case: `record_id`, `stratum`, `score`, `reasons`, `input_text`, `output_text` |
 | `records/<window>/labels.jsonl` | 4 | Authoritative | Yes | `criteria` |
 | `records/<window>/records.jsonl` | 4 | Authoritative | Yes | `input_text`, `output_text` |
 | A target goldens file | 3 | Authoritative | Only for `promote` | Its existing ids |

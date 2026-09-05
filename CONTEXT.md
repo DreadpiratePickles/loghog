@@ -6,22 +6,26 @@ inputs that stage declares.
 
 ## Stages
 
-The tool turns a production log into an evaluation dataset. Eight stages, one
-job each, and the first two are built. Everything in Phase A is deterministic:
-not one line of it calls a model, because turning a log line into a canonical
-record and stripping the personal data out of it is mechanical work, and
+The tool turns a production log into an evaluation dataset. Nine stages, one job
+each, and six of them are built. Everything built so far is deterministic: not
+one line of it calls a model. Turning a log line into a canonical record,
+stripping the personal data out of it, deciding which records are unusual and
+which are the same complaint twice — all of that is mechanical work, and
 mechanical work is code.
+
+The one stage that will ever call a model is `06_label`, and it is PLANNED.
 
 | Stage | Job | Lives in | Built? |
 |---|---|---|---|
 | `01_ingest` | Read one log file under one field mapping into canonical records, counting every line that does not make it | `stages/01_ingest/CONTEXT.md`, `src/loghog/ingest/` | Yes — Phase A |
 | `02_redact` | Replace every piece of personal data with a stable token **before anything is written**, and refuse to write text that still carries any | `stages/02_redact/CONTEXT.md`, `src/loghog/privacy/` | Yes — Phase A |
-| `03_score` | Score every record for how much it would teach: judge failures, disagreements, negative feedback, outliers, refusals | `stages/03_score/CONTEXT.md` | PLANNED |
-| `04_cluster` | Group near-duplicates so that twenty-five tickets about one bug become one case rather than twenty-five | `stages/04_cluster/CONTEXT.md` | PLANNED |
-| `05_select` | Choose the set: highest signal, deduplicated, and *stratified* so the dataset is not all of one failure | `stages/05_select/CONTEXT.md` | PLANNED |
+| `03_score` | Score every record against thirteen signals, each explainable: judge failures, disagreements, negative feedback, outliers, refusals, injection attempts | `stages/03_score/CONTEXT.md`, `src/loghog/score/` | Yes — Phase B |
+| `04_cluster` | Group near-duplicates so that twenty-five tickets about one bug become one case rather than twenty-five | `stages/04_cluster/CONTEXT.md`, `src/loghog/cluster/` | Yes — Phase B |
+| `05_select` | Choose the set: highest signal, one per cluster, and *stratified* so the dataset is not all of one failure | `stages/05_select/CONTEXT.md`, `src/loghog/select/` | Yes — Phase B |
 | `06_label` | The one stage that calls a model: draft checkable criteria for each selected record. One bounded call per record | `stages/06_label/CONTEXT.md` | PLANNED |
 | `07_emit` | Write the dataset in project 1's golden-case schema, as **drafts**, for a named human to promote | `stages/07_emit/CONTEXT.md` | PLANNED |
-| `08_health` | Report on the dataset itself: coverage, staleness, drift against the traffic it came from | `stages/08_health/CONTEXT.md` | PLANNED |
+| `08_health` | Report on the dataset itself: coverage and staleness of the goldens against the traffic they came from | `stages/08_health/CONTEXT.md` | PLANNED |
+| `09_drift` | Compare two windows: signal rates, subjects the older one never saw, input length, error rates with intervals | `stages/09_drift/CONTEXT.md`, `src/loghog/drift/` | Yes — Phase B |
 
 Stage 02 is not a stage you can skip or run afterwards. It runs *inside* stage
 01's write path, between building a record and writing it, and the writer
@@ -31,13 +35,23 @@ moment at which unredacted production text exists in a file.
 Stage 06 is the only stage that will ever leave the machine, and when it exists
 it will make exactly one bounded call per selected record.
 
+Stage 09 is numbered last because it is out of the pipeline rather than at the
+end of it. It is a question a person asks about two windows — has the traffic
+moved? — and it needs no goldens file, no shortlist and no model. Stage 08 asks
+the neighbouring question, is the *dataset* still about the system, and needs the
+goldens that stage 09 does not.
+
+The pipeline is four commands in order: `ingest`, `score`, `cluster`, `select`.
+Each refuses to run before its predecessor and names the command that fixes it.
+
 ## Shared resources
 
 | Path | Layer | What it is |
 |---|---:|---|
 | `README.md` | 0 | Workspace identity: what the tool is for, the four commands, and what Phase A does and does not claim |
 | `docs/design.md` | 3 | Every design decision and the reason for it. Read before changing behaviour |
-| `loghog.toml` | 3 | The paths, the privacy switch, the name allowlist and the text limit. No model id lives here |
+| `loghog.toml` | 3 | The paths, the privacy switch, the name allowlist, the text limit, and every weight, threshold and quota Phase B argues about. No model id lives here |
+| `src/loghog/config_values.py` | 3 | The validators every configuration section shares, so eight sections cannot drift in their wording |
 | `src/loghog/config.py` | 3 | Model identifiers, and nothing else. The only module that names a model |
 | `src/loghog/record.py` | 3 | The canonical record and its invariants. Every stage after 01 reads this and nothing else |
 | `src/loghog/errors.py` | 3 | The typed error hierarchy: five categories, because there are five things a caller does about a failure |
@@ -47,18 +61,34 @@ it will make exactly one bounded call per selected record.
 | `records/<window>/manifest.json` | 4 | Where the window came from: source hashes, mapping hashes, counts, redaction statistics |
 | `records/<window>/errors.jsonl` | 4 | One object per rejected line: its number, its type, and a reason. Never the line itself |
 | `records/<window>/ingest.md` | 4 | The human report. Banner-first when the window is synthetic or unredacted |
+| `records/<window>/scores.jsonl` | 4 | One object per record: its score and the evidence for every signal that fired |
+| `records/<window>/score.md` | 4 | The human scoring report — and, first among its prose, the signals that could **not** be evaluated |
+| `records/<window>/clusters.json` | 4 | The partition: members, representatives, the weakest link that built each cluster, and the parameters used |
+| `records/<window>/cluster.md` | 4 | The shape of the partition, and nothing from inside it |
+| `selected/<window>/candidates.jsonl` | 4 | The shortlist, carrying the redacted case because stage 06 needs it. Gitignored |
+| `selected/<window>/selection.md` | 4 | Every cap and the count it refused. Carries no case text |
+| `drift/<a>-vs-<b>.{md,json}` | 4 | Two windows compared. Carries no text from either |
 
 ## Reused from project 1
 
-`regression-detect`, pinned to commit `e41aa1b`, is declared as a dependency and
-**called by nothing in Phase A**. That is deliberate rather than an omission:
-ingestion and redaction are mechanical, so they are code, and a dependency
-imported to look busy is worse than one that is not imported yet.
+`regression-detect`, pinned to commit `e41aa1b`, is declared as a dependency.
+Phase A called none of it, deliberately: ingestion and redaction are mechanical,
+so they are code, and a dependency imported to look busy is worse than one that
+is not imported yet.
 
-The pin is declared now so that the dependency set a Phase A reader installs is
-the one Phase B runs against, and so that stage 07's schema can be checked
-against project 1's own loader rather than against a restatement of it. What the
-later stages will take:
+**Phase B calls two seams of it, and both for the same reason** — the alternative
+was a second implementation of something project 1 already owns:
+
+- `goldens.load_goldens` and `GoldenDatasetError`, behind `--existing` on
+  `loghog score` and `loghog select`. A goldens file is checked by *loading it
+  with the code that owns the schema*, which is the only check that cannot drift
+  from a restatement.
+- `compare.wilson_interval`, for stage 09's rate intervals. A rate computed by
+  two copies of one formula is a disagreement waiting to happen in the one place
+  nobody would think to look. A test asserts the imported name is project 1's
+  own function object rather than a lookalike.
+
+What the remaining stages will take:
 
 - **the provider seam** — `providers.base` (the `Provider` protocol and the typed
   error hierarchy), `providers.gemini.gemini_provider_from_env`, and
@@ -66,12 +96,15 @@ later stages will take:
 - **pacing** — `pacing.pace`, for spreading stage 06's calls under a per-minute
   quota;
 - **the criterion judge** — `judge.criterion.judge_criterion` and
-  `parse_verdict`, for stage 03's scoring of records that arrived without
-  verdicts;
-- **the statistics** — `compare.fisher_exact_one_sided` and
-  `compare.wilson_interval`, for stage 08's coverage intervals;
-- **the golden-case schema** — `goldens.load_goldens`, which stage 07's output
-  must load with, checked by calling it rather than by restating the schema;
+  `parse_verdict`. Stage 03 as built does **not** call it: every one of its
+  thirteen signals is deterministic, and a window whose records arrived without
+  verdicts is reported as such rather than judged into having some. Judging
+  unverdicted records is stage 06's business, where the call is bounded and
+  budgeted;
+- **the rest of the statistics** — `compare.fisher_exact_one_sided`, for stage
+  08's comparisons of one coverage figure against another;
+- **the golden-case schema** — `goldens.load_goldens` again, which stage 07's
+  *output* must load with, checked by calling it rather than by restating it;
 - **the target adapters** — `target.adapters` (`Target`, `CommandTarget`,
   `HttpTarget`, `BuiltinSummarizerTarget`), so that a dataset mined here can be
   replayed against the system it came from.
@@ -119,3 +152,29 @@ is not a dependency on their code.
 - **Anything synthetic says so on its own first line.** A window built from the
   sample log carries a `SYNTHETIC` banner in its report and a flag in its
   manifest, and the terminal says it too.
+
+## Rules that hold across every stage after ingestion
+
+- **A score is a sum somebody can recompute by hand.** The weights of the
+  signals that fired, and nothing else. No normalisation, no decay. A ranking
+  nobody can recompute is a ranking nobody can argue with.
+- **Evidence never quotes the record.** A signal names a pattern, a criterion, a
+  count or a threshold. `scores.jsonl`, `score.md`, `cluster.md`, `selection.md`
+  and both drift reports carry no customer's words at all. The only Phase B file
+  that holds text is `selected/<window>/candidates.jsonl`, because stage 06 needs
+  it, and it is gitignored at mode 0600 like the records.
+- **"Could not be evaluated" is not zero.** A signal the window silenced is
+  named, and the run exits 1. A signal absent because somebody chose not to
+  supply an input is named too, and exits 0. Printing a tidy zero for either
+  would read as evidence of absence.
+- **No cap is silent.** Every record left off a shortlist was refused by exactly
+  one named cap, and the summary counts each. An unfilled quota is never topped
+  up from another stratum.
+- **Blocking proposes; the exact answer disposes.** LSH decides which pairs are
+  worth comparing; the true Jaccard decides which are near-duplicates. A
+  threshold somebody has to argue with must not be a probability.
+- **Determinism is tested, not assumed.** Every stage writes identical bytes on a
+  second run, and clustering is asserted to be independent of the order of the
+  window *and* of the interpreter's hash seed.
+- **A stage refuses to run before its predecessor**, by name, with the command
+  that fixes it — never by quietly treating the missing input as empty.

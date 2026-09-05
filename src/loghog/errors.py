@@ -1,6 +1,6 @@
 """Every way this package can fail, as a type a caller can branch on.
 
-Five categories, because there are exactly five things a caller does about a
+Six categories, because there are exactly six things a caller does about a
 failure:
 
 - `ConfigError` — the run cannot start. Fix the file and try again.
@@ -11,10 +11,18 @@ failure:
 - `RedactionError` — a refusal to write. Never recoverable by retrying.
 - `WindowError` — what is already on disk contradicts what is about to be
   written.
+- `AnalysisError` — the window read fine and does not hold what this stage
+  needs. Run the earlier stage and try again.
 
 The distinction between `RecordError` and `SourceError` is load bearing: a bad
 line is counted and the run continues, a bad file stops it. Collapsing the two
 would make a typo in a mapping look like sixty thousand bad log lines.
+
+`AnalysisError` earns its own category for the same kind of reason. Everything
+under it is fixed by running a *different command* — `loghog score` before
+`loghog select`, `loghog cluster` before `loghog drift` — rather than by editing
+a file or repairing an export, and a caller that could not tell the two apart
+would tell an operator to fix a log that was never wrong.
 """
 
 from dataclasses import dataclass
@@ -145,3 +153,32 @@ class ManifestError(WindowError):
 
 class WindowConflictError(WindowError):
     """The window already exists and the run was not told to append to it."""
+
+
+# --- analysis ---------------------------------------------------------------
+
+
+class AnalysisError(LoghogError):
+    """A stage after ingestion cannot answer from what the window holds.
+
+    Distinct from `WindowError`, which is about a window that contradicts
+    itself. This one is about a window that is perfectly consistent and does not
+    yet contain the earlier stage's output — an absence with a command that
+    fixes it, which is why every message under here names that command.
+    """
+
+
+class ScoreError(AnalysisError):
+    """A window cannot be scored, or its scores cannot be read back."""
+
+
+class ClusterError(AnalysisError):
+    """Near-duplicate detection was given something it cannot partition."""
+
+
+class SelectionError(AnalysisError):
+    """A shortlist cannot be built from this window's scores and clusters."""
+
+
+class DriftError(AnalysisError):
+    """Two windows cannot be compared: one of them is missing a stage's output."""

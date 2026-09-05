@@ -183,6 +183,7 @@ def ingest(
         bytes=Path(input_path).stat().st_size,
         ingested_utc=stamp,
         redactions=report["total"],
+        expect_output_json=mapping.expect_output_json,
     )
     redaction = {
         "enabled": report["enabled"],

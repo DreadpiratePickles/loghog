@@ -17,7 +17,14 @@ from typing import Any
 from loghog import __version__
 from loghog.errors import ManifestError
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
+"""Version 2 adds `expect_output_json` to every source.
+
+A window written by version 1 cannot say whether its outputs were meant to parse
+as JSON, and defaulting that to "no" would make stage 03's `format_violation`
+permanently quiet on exactly the windows somebody most wanted it for. So a
+version-1 manifest is refused and the window is re-ingested, which is one
+command over a per-run artefact that was never committed."""
 
 DEDUPE_ALGORITHM = "sha256(lowercased, whitespace-collapsed, redacted input_text)"
 
@@ -51,6 +58,7 @@ class SourceEntry:
     bytes: int
     ingested_utc: str
     redactions: int
+    expect_output_json: bool = False
 
     def __post_init__(self) -> None:
         if Path(self.path).is_absolute():
@@ -62,6 +70,10 @@ class SourceEntry:
             digest = getattr(self, name)
             if not isinstance(digest, str) or len(digest) != 64:
                 raise ManifestError(f"{name} must be a 64-character sha256, got {digest!r}")
+        if not isinstance(self.expect_output_json, bool):
+            raise ManifestError(
+                f"expect_output_json must be true or false, got {self.expect_output_json!r}"
+            )
         for name in ("bytes", "redactions"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
@@ -70,6 +82,7 @@ class SourceEntry:
     def to_json_dict(self) -> dict[str, Any]:
         return {
             "bytes": self.bytes,
+            "expect_output_json": self.expect_output_json,
             "ingested_utc": self.ingested_utc,
             "mapping": self.mapping,
             "mapping_sha256": self.mapping_sha256,
@@ -264,6 +277,7 @@ def manifest_from_json_dict(payload: object) -> Manifest:
                     bytes=entry["bytes"],
                     ingested_utc=entry["ingested_utc"],
                     redactions=entry["redactions"],
+                    expect_output_json=entry["expect_output_json"],
                 )
                 for entry in payload["sources"]
             ),

@@ -1,0 +1,46 @@
+# The mapping for `judged_summaries.synthetic.jsonl`, and the one that exercises
+# everything Phase B added.
+#
+# It lives beside the sample rather than in `mappings/` for the same reason
+# `support_csv.toml` does: `mappings/` holds the three mappings meant to be
+# pointed at real systems, and a fourth for a thirteen-line demonstration file
+# would blur that line.
+#
+# Three things here are worth copying into a real mapping.
+#
+# `[expect] output_json` is the only mapping flag a later stage reads. It says
+# "this producer's output is supposed to parse", and stage 03 turns that into the
+# `format_violation` signal. It lives in the mapping because it is a fact about
+# one producer, and a window can hold several — so it travels to the scorer in
+# the manifest, per source, which is why the manifest schema is at version 2. If
+# two sources in one window disagree about it, the signal is refused rather than
+# guessed at: a record does not carry which source it came from.
+#
+# `judge_verdicts` is mapped from a list, with the key names spelled out. This
+# producer writes `ok` rather than `passed`, which is exactly the kind of thing a
+# mapping exists to absorb: nothing downstream knows or cares.
+#
+# `prompt_version` is mapped, and two versions appear in the sample answering the
+# same question with different outcomes. That is the `version_disagreement`
+# signal — and it can only be seen in a window ingested with `[dedupe] dedupe =
+# false`, because deduplication is on the input and would otherwise have made the
+# two into one record. Stage 03 says so rather than reporting zero.
+
+schema_version = 1
+name = "judged_summaries"
+description = "Judged summary events: verdicts, prompt versions and JSON outputs."
+source_format = "jsonl"
+
+[expect]
+output_json = true
+
+[fields]
+record_id = { path = "request_id" }
+ts_utc = { path = "ts_utc" }
+input_text = { path = "question" }
+output_text = { path = "answer" }
+prompt_version = { path = "prompt_label" }
+error = { path = "error_type" }
+feedback = { path = "feedback" }
+latency_ms = { path = "latency_ms" }
+judge_verdicts = { path = "verdicts", criterion_key = "criterion", passed_key = "ok" }

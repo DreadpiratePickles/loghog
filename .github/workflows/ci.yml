@@ -2,10 +2,10 @@
 #
 # There are no secrets here and no `secrets.*` reference anywhere in the file,
 # and unlike the sibling repositories in this series that is not a compromise —
-# it is the whole shape of Phase A. Stages 01 and 02 are ingestion and
-# redaction, both of which are mechanical, and mechanical work is deterministic
-# code. Nothing in this repository has ever called a model. The first stage that
-# will is `06_label`, and it is PLANNED.
+# it is the whole shape of the six stages that exist. Ingestion, redaction,
+# scoring, clustering, selection and drift are all mechanical, and mechanical
+# work is deterministic code. Nothing in this repository has ever called a model.
+# The first stage that will is `06_label`, and it is PLANNED.
 #
 # The action SHAs are pinned and were copied from project 1's workflow, which is
 # where they were first read. A tag is a moving reference, and an action that
@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   checks:
-    name: lint, tests, privacy, offline lifecycle
+    name: lint, tests, privacy, offline lifecycle, analysis
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -150,6 +150,118 @@ jobs:
           grep -q '\[EMAIL_1\]' "$demo/redact.txt"
           grep -q '\[CARD_1\]' "$demo/redact.txt"
           grep -qF '1234567812345678' "$demo/redact.txt"
+
+          # --- Phase B, over the judged sample ----------------------------
+          #
+          # The judged sample is thirteen invented events written so that twelve
+          # of the thirteen signals fire on it, and the thirteenth (`novelty`)
+          # fires as soon as a goldens file is passed. A scoring stage
+          # demonstrated against a log where nothing fires is a scoring stage
+          # nobody has seen work.
+          #
+          # `dedupe = false` for this window on purpose: deduplication is on the
+          # input, so with it on the two prompt versions answering one question
+          # are already one record and `version_disagreement` cannot be seen.
+          # Both halves of that are asserted below.
+          echo "--- Phase B: score, cluster, select, drift ---"
+          sed 's/^dedupe = true/dedupe = false/' "$demo/loghog.toml" > "$demo/nodedupe.toml"
+          nodedupe() { uv run loghog "$@" --config "$demo/nodedupe.toml"; }
+
+          cat > "$demo/goldens.yaml" <<'GOLDENS'
+          - id: parcel_left_in_bin
+            tags: [delivery]
+            input: The delivery driver left the parcel in the recycling bin without ringing.
+            criteria:
+              - names the parcel and the bin
+          GOLDENS
+
+          nodedupe ingest --input samples/judged_summaries.synthetic.jsonl \
+              --format jsonl --mapping "$demo/samples/judged_summaries.toml" \
+              --window judged --synthetic
+          nodedupe score --window judged --existing "$demo/goldens.yaml" | tee "$demo/score.txt"
+          nodedupe cluster --window judged | tee "$demo/cluster.txt"
+          nodedupe select  --window judged | tee "$demo/select.txt"
+
+          echo "--- every signal fired, and the report says none was skipped ---"
+          for signal in error judge_failure negative_feedback feedback_conflict \
+                        version_disagreement injection_pattern refusal_pattern \
+                        format_violation novelty latency_outlier length_outlier \
+                        non_ascii_ratio tiny_input; do
+            grep -qE "^  ${signal}  [0-9]+$" "$demo/score.txt" || {
+              echo "::error::signal ${signal} did not fire on the judged sample."
+              exit 1
+            }
+          done
+          grep -qF 'Every signal had what it needed.' "$demo/records/judged/score.md"
+
+          echo "--- redaction held in this window too ---"
+          judged="$demo/records/judged/records.jsonl"
+          if grep -qF 'sam.doe@example.com' "${judged}"; then
+            echo "::error::the judged window contains an address. Redaction did not hold."
+            exit 1
+          fi
+          grep -qF '[EMAIL_1]' "${judged}"
+
+          echo "--- the paraphrase clustered with its twin ---"
+          grep -qF '"js-010"' "$demo/records/judged/clusters.json"
+          uv run python -c "
+          import json, sys
+          clusters = json.load(open('$demo/records/judged/clusters.json'))['clusters']
+          pairs = [c['member_ids'] for c in clusters if c['size'] > 1]
+          sys.exit(0 if ['js-001', 'js-010'] in pairs else 1)
+          " || {
+            echo "::error::js-001 and js-010 are paraphrases and did not cluster."
+            exit 1
+          }
+
+          echo "--- no cap is silent ---"
+          grep -q 'dropped, by cap:' "$demo/select.txt"
+          grep -q 'unfilled strata, never topped up from another' "$demo/select.txt"
+          grep -q '## What was dropped, and by which cap' "$demo/selected/judged/selection.md"
+
+          echo "--- a deduplicated window says the disagreement is invisible, and exits 1 ---"
+          set +e
+          loghog ingest --input samples/judged_summaries.synthetic.jsonl \
+              --format jsonl --mapping "$demo/samples/judged_summaries.toml" \
+              --window deduped --synthetic > /dev/null
+          loghog score --window deduped > "$demo/deduped.txt"
+          blocked=$?
+          set -e
+          test "${blocked}" -eq 1 || {
+            echo "::error::score over a deduplicated window exited ${blocked}, expected 1."
+            exit 1
+          }
+          grep -q 'NOT EVALUATED: version_disagreement' "$demo/deduped.txt"
+
+          echo "--- drift, between two windows built from two different samples ---"
+          nodedupe ingest --input samples/support_chat.synthetic.jsonl \
+              --format jsonl --mapping openai_chat_jsonl --window chat --synthetic || true
+          nodedupe score   --window chat > /dev/null
+          nodedupe cluster --window chat > /dev/null
+          nodedupe drift --from chat --to judged | tee "$demo/drift.txt"
+          grep -q 'new cluster' "$demo/drift.txt"
+          test -f "$demo/drift/chat-vs-judged.json"
+
+          # The claim every one of these reports makes about itself. `records.jsonl`
+          # and `candidates.jsonl` hold the case, because the next stage needs it;
+          # nothing else does, because a report is what somebody pastes into a
+          # ticket.
+          echo "--- not one report quotes the text it is reporting on ---"
+          for report in "$demo/records/judged/score.md" \
+                        "$demo/records/judged/cluster.md" \
+                        "$demo/selected/judged/selection.md" \
+                        "$demo/drift/chat-vs-judged.md"; do
+            for leaked in 'recycling bin' 'kettle' 'warranty card' 'sam.doe@example.com' \
+                          'Dr Pepper' 'flickers'; do
+              if grep -qF "${leaked}" "${report}"; then
+                echo "::error::${report} quotes '${leaked}'. A report is not a second copy of the data."
+                exit 1
+              fi
+            done
+          done
+
+          echo "--- the shortlist DOES carry the case, because stage 06 needs it ---"
+          grep -qF 'recycling bin' "$demo/selected/judged/candidates.jsonl"
 
           # `git status --porcelain` is the load-bearing check because it sees
           # untracked files too — a stage that wrote a brand-new records/ into

@@ -10,6 +10,11 @@ the problem and the shape of the answer, §8-§14 are the canonical record and t
 mapping layer, §15-§21 are privacy, §22-§26 are the window, and §27-§29 are what
 was found by running it rather than by reasoning about it.
 
+Phase B is stages 03, 04, 05 and 09 — scoring, clustering, selection and drift.
+§30-§34 are scoring, §35-§40 are near-duplicate detection, §41-§44 are selection,
+§45-§47 are drift, and §48-§49 are what Phase B found by running it. All four
+stages are deterministic; §30 is about why.
+
 ---
 
 ## 1. The problem, and why "log the traffic" is not a solution to it
@@ -410,3 +415,354 @@ supposed to exit 1.
 - **`records/` is gitignored, not encrypted.** The privacy property this tool
   provides is that personal data is removed before it is written. It provides
   nothing at all about the disk it is written to.
+
+---
+
+# Phase B
+
+Stages 03, 04, 05 and 09 — scoring, clustering, selection and drift.
+
+## 30. Why none of Phase B calls a model either
+
+The obvious design for "which of these records is interesting" is to ask a
+model. It would work, and it is the wrong tool for three separate reasons.
+
+**It would not be explainable.** A number a model produced cannot be recomputed,
+so a disagreement about a ranking becomes a disagreement about a model, which is
+not an argument anybody can win. Thirteen signals with integer weights produce a
+score somebody can recompute in their head from the list printed beside it, and
+an argument about that is a one-line diff in a reviewed file.
+
+**It would not be reproducible.** A window scored twice would rank differently,
+and stage 05's shortlist is meant to be a function of the window.
+
+**It would cost a call per record.** The whole point of scoring is to decide
+which handful of records are worth a model call in stage 06. Spending one per
+record to decide that is spending the budget on the decision instead of on the
+work.
+
+So Phase B is deterministic in its entirety, and stage 06 remains the only stage
+that will ever leave the machine.
+
+## 31. Why a score is a plain sum of integers
+
+No normalisation, no decay, no multiplication, no per-window rescaling. The
+score printed on a record is the sum of the weights of the signals listed beside
+it, and the arithmetic is checkable with a pencil.
+
+Every alternative was more accurate and less useful. Normalising to 0-1 makes
+two windows comparable and makes a single score meaningless on its own.
+Recency decay makes yesterday's outage outrank last week's unfixed one. Both
+would have made "why is this record ranked above that one?" a question only the
+code can answer, and the person asking it is usually the person who has to
+defend the dataset.
+
+## 32. Why the patterns are code and the weights are configuration
+
+The line is between a *definition* and an *argument*.
+
+"What does a prompt injection look like?" is a definition. It belongs with tests
+naming each shape, in a fixed registry, for the same reason extractors are a
+fixed registry: a regex read from a configuration file is a regex nobody
+reviewed, and a badly written one is a run that never finishes over somebody
+else's log.
+
+"Is a refusal worth more than a slow answer?" is an argument, and it belongs in
+`[score.weights]` where changing it is a diff somebody reviews.
+
+The feedback vocabularies sit on the configuration side of that line, because
+whether "up" or "5" or "helpful" means positive is a fact about somebody's
+product rather than about the world.
+
+## 33. Why "not evaluated" is a first-class outcome, and sometimes exits 1
+
+The most dangerous number a scoring report can print is a zero it did not earn.
+"No version disagreements in this window" and "version disagreements cannot be
+seen in this window" are different facts, and a table that renders both as `0`
+tells the reader the first when the truth is the second.
+
+So every signal that produced no answer is listed with its reason, and the
+reasons are of two kinds:
+
+- **an absence somebody chose** — no goldens file was passed, no mapping in the
+  window declares `[expect] output_json`, the window is too small for a p95.
+  These exit 0. Nothing is wrong.
+- **an impediment the window imposes** — see §34, and the case where two sources
+  in one window disagree about whether outputs should parse. These exit **1**,
+  the same code a partial ingest returns, for the same reason: nobody reads the
+  report of a command that succeeded.
+
+The distinction matters because a code that was 1 on every run would stop being
+read, which is exactly the failure it exists to prevent.
+
+## 34. Why a deduplicated window cannot show a version disagreement
+
+This one fell out of writing the signal and is the clearest thing Phase B
+learned about Phase A.
+
+Stage 01 deduplicates on the SHA-256 of the normalised, redacted **input** —
+§22, and it is right. But `version_disagreement` asks a question about *two
+records with the same input*: one arm passed, another failed. In a deduplicated
+window those two are already one record, and the signal is looking for something
+the ingester correctly removed.
+
+The options were to change dedupe to key on `(input, prompt_version)`, or to say
+so. Changing it would make two arms answering one question two eval cases, which
+is wrong — they are one case with a disagreement in it, which is exactly what
+§22 argues. So the scorer reads the manifest, and when `dedupe_enabled` is true
+it reports the signal as **blocked**, names `[dedupe] dedupe = false` as the fix,
+and exits 1.
+
+A window ingested to *find disagreements* is a different window from one
+ingested to *build a dataset*, and it is better for that to be a sentence in a
+report than an assumption in a hash.
+
+## 35. Why near-duplicate detection uses shingles and not embeddings
+
+An embedding threshold of 0.83 is a number nobody can explain, nobody can check
+by hand, and nobody can reproduce without pinning a model. A shingle overlap of
+0.6 is a number a reviewer can verify with a pencil by writing out two sets of
+five-word phrases.
+
+When somebody later asks "why did these two tickets merge", the answer here is a
+list of phrases they shared. "They were close in vector space" is not an answer,
+and the person asking is usually the person who has to defend the dataset to
+somebody else.
+
+It is also the only choice that keeps the whole of Phase B offline and free.
+
+## 36. Why normalisation collapses redaction tokens
+
+`[EMAIL_1]` and `[EMAIL_2]` both mean "an address was here". The number in them
+is *which customer wrote in* — which is precisely the fact stage 02 worked to
+make stable across a window (§20).
+
+Left in, that number would split one cluster by customer: twenty-five people
+writing in about one outage, each with their own token, would be twenty-five
+clusters. So normalisation rewrites `[CLASS_N]` to `[class]` **before** digits
+are stripped — in the other order the token becomes `[EMAIL_]` and two tokens of
+one class are still two different words.
+
+## 37. Why a text with no words is always a singleton
+
+An input of `"12345 67890"` normalises to nothing: the digits go, and there are
+no other words. The tempting implementation gives it a shingle set of `{""}`,
+and then two such records have a Jaccard of 1.0 and cluster together.
+
+That is two absences being called a match. `jaccard(∅, ∅)` is conventionally 1
+and is **0** here, records with no shingles never reach the LSH stage at all, and
+the cluster report says how many there were. A bare order number is not evidence
+that two tickets are about the same thing; it is evidence of nothing.
+
+## 38. Why the base hash is BLAKE2b and not Python's `hash()`
+
+`hash()` of a `str` is salted per interpreter process. It is stable within one
+run and different in the next.
+
+An implementation built on it passes every unit test — signatures are
+self-consistent, identical sets agree, disjoint sets do not — and silently
+produces a different partition of the same window on the next invocation.
+Nothing would fail. The clusters in `clusters.json` would simply stop matching
+the ones in yesterday's, and the first person to notice would be someone
+comparing two drift reports six weeks later.
+
+The catch is a test that runs the module in two subprocesses under two values of
+`PYTHONHASHSEED` and compares the output. It is the only kind of test that
+catches this, and it is the reason this section exists.
+
+## 39. Why LSH only proposes, and the exact Jaccard disposes
+
+Banding gives each pair a probability of becoming a candidate:
+`1 - (1 - s^r)^b` for similarity `s`. It is a smooth curve, not a threshold.
+
+A tool whose merge rule was that curve would have a threshold that is a
+probability, and "these two merged because they collided in a band" is not a
+sentence anybody can argue with. So banding is used as a **blocking** step and
+nothing more: every candidate pair gets its true Jaccard computed and is merged
+only if it clears the configured number.
+
+That costs one set intersection per candidate — 96 of them on the suite's
+70-record corpus, against 2,415 pairs compared exhaustively — and it buys a
+partition whose every merge is a number a reviewer can recompute.
+
+The measured consequence, from `tests/test_cluster_run.py` against a brute-force
+comparison of all 2,415 pairs: **precision 1.000, recall 0.960**. Precision is 1
+by construction. Recall is where the banding actually costs something, and the
+suite asserts it rather than assuming it, because a clustering tool that does not
+measure what its blocking step lost is a tool making a claim nobody checked.
+
+## 40. Why a cluster publishes its weakest link
+
+Union-find gives single-linkage clustering, which is transitive: A merges with
+B, B merges with C, and A and C are in one cluster even if their own similarity
+is below the threshold.
+
+That is a real property of this design rather than a bug — a chain of
+paraphrases is one complaint, and cutting the chain would split it. But it means
+"this cluster's similarity is 0.81" would be a number about one pair presented
+as a number about a group. So a cluster reports the **lowest** exact Jaccard
+among the edges that built it, which is the honest summary and the one a reader
+can act on: if the weakest link looks wrong, the threshold is wrong.
+
+Union is by *name* rather than by rank or size, so the partition and its labels
+do not depend on the order the pairs arrived in.
+
+## 41. Why selection has four caps and why their order is fixed
+
+1. **already in the goldens**, first, so that a case you already hold never
+   consumes the slot a new one needed;
+2. **the cluster cap**, so that twenty-five tickets about Tuesday's outage
+   cannot spend twenty-five of the budget on one subject;
+3. **the stratum quota**, so that the dataset is not made entirely of the
+   loudest failure mode of that week;
+4. **the global cap**, last, so that it is only ever blamed for records that
+   would otherwise have been taken.
+
+The order is what makes the counts in `selection.md` mean something. Put the
+global cap first and every refused record is attributed to it, and the report
+stops being able to say whether a quota would have stopped them anyway.
+
+## 42. Why a record's stratum is its highest-weighted signal
+
+A record that fired `error`, `length_outlier` and `tiny_input` has to be counted
+against exactly one quota, or the quotas do not add up.
+
+Counting it against the highest-weighted signal counts it against the evidence
+that actually made it interesting. Ties are broken by the fixed registry order,
+so two runs over one window put every record in the same stratum — and a signal
+name a later build invented, appearing in a scores file this build reads, falls
+back to `ordinary` rather than being guessed into a quota nobody configured.
+
+## 43. Why every stratum must be named in configuration, zero included
+
+An absent quota is a silent zero, and a silent zero is a stratum that never gets
+chosen for a reason nobody wrote down. So `[select.quotas]` must name every
+signal and `ordinary`, and a missing one is refused at load with the name in the
+message.
+
+Zero itself is allowed, and means "never take this kind" — which is a decision
+somebody made. Note the asymmetry with `[score.weights]`, where a weight of zero
+for *every* signal is refused: a zero quota says "not this kind of case", which
+is a choice, while all-zero weights say "no evidence is worth anything", which
+would make selection alphabetical.
+
+## 44. Why an unfilled stratum does not make the exit code 1
+
+Most windows contain no prompt injections and no format violations. If an
+unfilled quota returned 1, `loghog select` would return 1 on almost every run,
+and a code that is always 1 conveys nothing — which is the same argument §25
+makes for why a *partial* ingest must not return 0.
+
+So the shortfall is printed, on the terminal and in `selection.md`, and never
+topped up from another stratum. What does return 1 is **truncation**: the global
+cap stopped a record that would otherwise have been taken, which means there was
+more worth having and somebody should look.
+
+## 45. Why the drift stage is numbered 09 and is not in the pipeline
+
+Stage 08 (`08_health`, PLANNED) asks whether the *dataset* is still about the
+system, and needs a goldens file to do it. Stage 09 asks whether the *traffic*
+has moved, and needs no goldens file, no shortlist and no model — only two
+windows that have been scored and clustered.
+
+They are neighbouring questions with different inputs and different answers, and
+folding the second into the first would mean you could not ask "has anything
+changed?" until after you had built a dataset to compare against. The number is
+last because it is out of the pipeline, not at the end of it.
+
+## 46. Why the KS statistic is reported as a statistic
+
+The two-sample Kolmogorov-Smirnov statistic is the largest gap between two
+empirical distribution functions. There is a well-known p-value for it, and this
+tool does not compute one.
+
+Two windows compared here are two windows a person picked — last week and this
+week, before a deploy and after it. That is not a sampling design under which a
+p-value means anything, and printing one would dress a judgement call up as a
+test. `0.62` with "inputs got longer" beside it is the honest thing to publish.
+
+The same reasoning names the Wilson comparison `separated` rather than
+`significant`: two non-overlapping intervals are a conservative screen, and
+calling it a test would be a claim this tool has not earned.
+
+## 47. Why `wilson_interval` is imported and `ks_statistic` is written
+
+Both are short. The difference is that project 1 already has one of them.
+
+A rate interval computed by two implementations of one formula is a
+disagreement waiting to happen in the one place nobody would think to look — a
+coverage figure in this repository disagreeing by half a percent with the same
+figure in project 1, for six months, until somebody diffed two reports. So
+`compare.wilson_interval` is imported, and a test asserts the imported name is
+project 1's own function object rather than a lookalike with the same name.
+
+The KS statistic is thirty lines of pure Python and nothing else in the
+workspace has one. A dependency for thirty lines is a dependency for thirty
+lines.
+
+## 48. Why the manifest schema went to version 2
+
+`format_violation` needs to know whether a producer's output was *supposed* to
+parse as JSON. That is a fact about a mapping, and the stage that checks it runs
+days later against a window rather than against a file — so the flag has to
+travel, and it travels in the manifest, per source.
+
+A window written by version 1 cannot say. Defaulting it to "no" would make the
+signal permanently quiet on exactly the windows somebody most wanted it for, so a
+version-1 manifest is refused and the window is re-ingested — one command over a
+per-run artefact that was never committed.
+
+When two sources in one window disagree about the flag, the signal is refused
+rather than guessed at: a record does not carry which source it came from, and
+guessing would apply one producer's contract to another producer's output.
+
+## 49. What running Phase B found that reasoning about it did not
+
+Three, and the first is the one worth the section.
+
+**A refusal pattern that needed two "I"s.** The `cannot_help` regex was written
+around the apologetic shape — "I'm sorry, but I can't help with that" — and
+required the word "I" twice, once before the apology and once before the
+inability. `"I cannot assist with this request."` therefore matched nothing at
+all, which is the single most common refusal shape a model produces. The fix is
+two alternatives in one pattern: the apologetic form, and a flat
+`I cannot <verb>` pinned to a list of verbs so that "I can't find the order
+number you gave me" stays a support answer rather than becoming a refusal. Found
+by writing the test table first and watching two of five rows fail.
+
+**Two configuration keys that shadowed each other.** `[score]` had
+`non_ascii_ratio` as a threshold and `[score.weights]` had `non_ascii_ratio` as a
+weight; likewise `negative_feedback`. Both are legal TOML in different tables and
+both are a trap for anybody editing the file — and they broke a test that edits
+one line by key, which is how they were found. Renamed to
+`non_ascii_threshold`, `negative_feedback_words` and `positive_feedback_words`.
+The lesson is that a configuration file is read by people using find, not by a
+parser using scopes.
+
+**Version disagreement against a deduplicated window** — §34. Not a bug in the
+code; a genuine contradiction between two correct decisions, found by writing
+the signal and having nothing to point it at. It became a reported impediment
+rather than a silent zero, which is a better outcome than either of the two
+changes that would have hidden it.
+
+## 50. What Phase B does not claim
+
+- **Still no model call, anywhere.** Six of nine stages are built and none of
+  them has ever left the machine. There is no live figure in this repository
+  because there is nothing to be live about: `06_label` is the first stage that
+  will call a model, and it is PLANNED. Every number reported here came from
+  `uv run pytest` or from the committed samples through the real command line.
+- **The precision and recall figures are against a synthetic corpus.** 1.000 and
+  0.960 are measured, deterministic and reproducible, and they are measured
+  against ten families of paraphrases somebody wrote for the purpose. They say
+  the blocking step loses about four per cent of the pairs the exact comparison
+  would find *on that corpus*. Point it at your own log before believing the
+  second decimal place.
+- **Thirteen signals are not the thirteen signals.** They are the ones that were
+  cheap, deterministic and defensible. A real deployment will want one about its
+  own domain, and adding one is a function, a name in `SIGNAL_NAMES`, a weight
+  and a quota.
+- **The thresholds are the ones the samples needed.** `jaccard_threshold = 0.6`
+  is where support traffic sat in an invented corpus. It is the first number to
+  change against your own log, and the report prints it every time so that
+  changing it is an argument somebody can have.

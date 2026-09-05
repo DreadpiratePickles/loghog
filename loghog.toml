@@ -28,6 +28,13 @@ records_dir = "records"
 # whose mapping is not in the repository is a window nobody can reproduce.
 mappings_dir = "mappings"
 
+# Where `loghog select` writes a shortlist, and where `loghog drift` writes a
+# comparison of two windows. Both are GITIGNORED for the same reason
+# `records_dir` is: a candidate carries the redacted text of the case, which is
+# still the thing a customer wrote.
+selected_dir = "selected"
+drift_dir = "drift"
+
 [privacy]
 # The default, and the one setting in this file that is a safety property rather
 # than a preference. While it is true, every text field passes through the
@@ -72,3 +79,120 @@ max_text_chars = 20000
 # Turn it off to measure how much duplication a log actually has before deciding
 # what to do about it.
 dedupe = true
+
+[score]
+# What counts as interesting, and how much. The list of signals is code — each
+# one is a function — and the WEIGHT on each is here, because each weight is an
+# argument. Whether a refusal matters more than a slow answer is a thing a team
+# should disagree about in a pull request, not a constant somebody changed while
+# fixing something else.
+
+# An input this short is a "hello?", a test message, or a truncated paste. Worth
+# noticing and rarely worth an eval case.
+tiny_input_chars = 24
+
+# Above this fraction of non-ASCII characters, a record is either in a language
+# the prompt was not written for or is mojibake. Both are worth a case.
+non_ascii_threshold = 0.25
+
+# A record is NOVEL when its best Jaccard against every case in the goldens file
+# passed with --existing is below this. Deliberately low: at 0.6 a case that
+# merely rhymes with an existing one would count as new.
+novelty_max_jaccard = 0.3
+
+# Outliers are measured against the window's own distribution, by nearest-rank
+# percentile, and only when the window is big enough for a percentile to mean
+# anything. Below min_outlier_sample the two outlier signals report that they
+# could not be evaluated rather than firing on a window of four.
+outlier_percentile = 95
+min_outlier_sample = 12
+
+# What the `feedback` field means. Matched case-insensitively against the whole
+# value, because a rating is a token rather than prose. These are the words this
+# repository's samples use; a real deployment's are its own, and a word may not
+# appear in both lists.
+negative_feedback_words = ["down", "thumbs_down", "bad", "negative", "unhelpful", "1", "2"]
+positive_feedback_words = ["up", "thumbs_up", "good", "positive", "helpful", "4", "5"]
+
+[score.weights]
+# Non-negative integers, and they may not all be zero. Integers so that a score
+# can be recomputed by hand from the signal list printed beside it — a ranking
+# nobody can recompute is a ranking nobody can argue with.
+#
+# The shape of the argument these numbers encode: evidence that a human
+# disagreed with the output outranks evidence that a machine did, and both
+# outrank evidence that the input merely looked unusual.
+error = 4
+judge_failure = 5
+negative_feedback = 4
+feedback_conflict = 6
+version_disagreement = 5
+injection_pattern = 4
+refusal_pattern = 3
+format_violation = 3
+novelty = 3
+latency_outlier = 2
+length_outlier = 2
+non_ascii_ratio = 1
+tiny_input = 1
+
+[cluster]
+# Near-duplicate detection. Five-word shingles, MinHash sketches, LSH banding,
+# and then an EXACT Jaccard check on every candidate pair before anything is
+# merged — so the threshold below is a similarity somebody can recompute by
+# hand, not a probability from the banding curve.
+shingle_words = 5
+
+# 64 hashes in 16 bands of 4 rows. The banding curve's midpoint is
+# (1/bands)^(1/rows) = 0.5, comfortably below the threshold, which is what buys
+# recall. bands must divide permutations or some rows are never read.
+permutations = 64
+bands = 16
+
+# The sketch is a function of the configuration and nothing else. Change this
+# and the partition changes; leave it and two runs agree for ever.
+seed = 1729
+
+# The argument everybody has. At 0.4 two different bugs in one feature merge; at
+# 0.8 a paraphrase becomes its own case. 0.6 is where support traffic sat in the
+# samples here, and it is the first number to change against your own log.
+jaccard_threshold = 0.6
+
+[select]
+# The shortlist. `max_candidates` is the global cap and `max_per_cluster` is the
+# diversity rule: twenty-five tickets about Tuesday's outage are one case, and
+# taking more than one of them spends the dataset's budget measuring one thing.
+max_candidates = 40
+max_per_cluster = 1
+
+[select.quotas]
+# The cap per stratum, where a record's stratum is the highest-weighted signal
+# it fired. Every stratum is named, including `ordinary`, and an absent one is
+# REFUSED rather than defaulted to zero — a silent zero is a cap nobody argued
+# about, and the whole point of selection.md is that no cap is silent.
+#
+# Zero is allowed and means "never take this kind", which is a decision. An eval
+# set of nothing but failures cannot tell you that you broke the ordinary case,
+# which is why `ordinary` is not zero here.
+error = 6
+judge_failure = 8
+negative_feedback = 6
+feedback_conflict = 4
+version_disagreement = 4
+injection_pattern = 3
+refusal_pattern = 3
+format_violation = 3
+novelty = 4
+latency_outlier = 2
+length_outlier = 2
+non_ascii_ratio = 2
+tiny_input = 1
+ordinary = 6
+
+[drift]
+# A cluster in the newer window is NEW when nothing in the older window is this
+# similar to it. Deliberately not `[cluster] jaccard_threshold`: merging two
+# records into one case is a stricter claim than noticing a subject has been
+# seen before, and one number for both would tie two unrelated arguments
+# together.
+novel_cluster_jaccard = 0.4

@@ -1,9 +1,10 @@
 """The error hierarchy is the contract: a caller catches a category, not a string.
 
 Every failure this package can produce is a `LoghogError`, and every one of them
-sits under exactly one of the five categories a caller might want to treat
+sits under exactly one of the six categories a caller might want to treat
 differently — bad configuration, a bad record, a bad source line, a refusal to
-write unredacted text, and a broken window on disk.
+write unredacted text, a broken window on disk, and a window that read fine and
+does not yet hold what a later stage needs.
 """
 
 import inspect
@@ -36,19 +37,24 @@ def test_every_public_error_descends_from_the_root():
         (errors.UnredactedWriteError, errors.RedactionError),
         (errors.ManifestError, errors.WindowError),
         (errors.WindowConflictError, errors.WindowError),
+        (errors.ScoreError, errors.AnalysisError),
+        (errors.ClusterError, errors.AnalysisError),
+        (errors.SelectionError, errors.AnalysisError),
+        (errors.DriftError, errors.AnalysisError),
     ],
 )
 def test_the_categories_are_the_ones_a_caller_would_branch_on(child, parent):
     assert issubclass(child, parent)
 
 
-def test_the_five_categories_are_siblings_and_not_each_other():
+def test_the_six_categories_are_siblings_and_not_each_other():
     categories = [
         errors.ConfigError,
         errors.RecordError,
         errors.SourceError,
         errors.RedactionError,
         errors.WindowError,
+        errors.AnalysisError,
     ]
     for one in categories:
         for other in categories:

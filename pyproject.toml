@@ -1,7 +1,7 @@
 [project]
 name = "loghog"
 version = "0.1.0"
-description = "Turn production logs into an evaluation dataset: ingest under a field mapping, redact the PII before anything is written, and keep a manifest that says what came from where."
+description = "Turn production logs into an evaluation dataset: ingest under a field mapping, redact the PII before anything is written, score every record against signals you can read, fold near-duplicates into one case, and hand back a shortlist in which nothing was dropped silently."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,12 +13,14 @@ dependencies = [
     # adapters (`Target`, `CommandTarget`, `HttpTarget`,
     # `BuiltinSummarizerTarget`).
     #
-    # Phase A — stages 01 and 02, the only stages built — calls NONE of it. Not
-    # one line here talks to a model, and that is the point: ingestion and
-    # redaction are mechanical, so they are code. The pin is declared now anyway
-    # so the dependency set a Phase A reader installs is the one Phase B runs
-    # against, and so that the schema this stage emits is checked against
-    # project 1's real loader rather than against a restatement of it.
+    # Phase A called none of it. Phase B calls two seams, and both because the
+    # alternative was a second implementation of something project 1 owns:
+    # `goldens.load_goldens` behind `--existing`, so a goldens file is checked by
+    # loading it with the code that owns the schema; and `compare.wilson_interval`
+    # for the drift report's rate intervals, because one formula with two
+    # implementations is a disagreement waiting to happen in the one place
+    # nobody would look. Still no model call anywhere: every stage built so far
+    # is mechanical, and mechanical work is code.
     #
     # Pinned to a COMMIT, not a branch. A window's manifest names the code that
     # produced it; a branch that moves underneath makes that name a guess.
