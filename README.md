@@ -6,6 +6,7 @@
 
 **This is the part in between: read the log, take the people out of it before anything is written, find the handful of records that would teach you something, and hand a person the one command that adopts one.**
 
+[![ci](https://github.com/DreadpiratePickles/loghog/actions/workflows/ci.yml/badge.svg)](https://github.com/DreadpiratePickles/loghog/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![tests: 1141](https://img.shields.io/badge/tests-1141-brightgreen)](tests/)
