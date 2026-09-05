@@ -7,7 +7,7 @@ eval case is about. Luhn is a cheap, deterministic filter that keeps them.
 
 import pytest
 
-from loghog.privacy.luhn import luhn_ok
+from loghog.privacy.luhn import CARD_SEPARATORS, luhn_ok
 
 # The vendors' own published test numbers. They are not real accounts and never
 # were; every payment stack in the world ships them in its documentation.
@@ -40,6 +40,17 @@ def test_a_plausible_looking_sixteen_digit_number_that_is_not_a_card_fails():
 def test_separators_are_ignored_because_people_type_cards_in_groups():
     assert luhn_ok("4242 4242 4242 4242") is True
     assert luhn_ok("4242-4242-4242-4242") is True
+
+
+def test_the_separator_set_is_the_four_a_person_or_a_spreadsheet_types():
+    assert set(CARD_SEPARATORS) == {" ", "-", ".", "_"}
+
+
+@pytest.mark.parametrize("separator", sorted(CARD_SEPARATORS))
+def test_every_separator_in_the_set_is_ignored(separator):
+    # A card pasted out of a spreadsheet column or a filename arrives dotted or
+    # underscored. The checksum does not care, and neither should the caller.
+    assert luhn_ok(separator.join(["4242", "4242", "4242", "4242"])) is True
 
 
 def test_a_string_with_no_digits_is_not_a_card():

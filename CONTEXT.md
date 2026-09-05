@@ -145,8 +145,10 @@ is not a dependency on their code.
 
 - **Redaction happens before the first write, not after the last one.** There is
   no moment at which unredacted production text exists in a file. The writer
-  re-checks every record against the five structural PII classes and refuses the
-  whole batch if one still carries any.
+  re-checks every text field of every record — the four in `REDACTED_TEXT_FIELDS`
+  and each `judge_verdicts[].criterion` — against the five structural PII classes
+  and refuses the whole batch if one still carries any. Identifiers and labels
+  (`record_id`, `prompt_version`, `arm`) are deliberately outside that set.
 - **`[privacy] redact = false` needs a second switch on the command line.** Two
   switches, in two places, one of them typed by a person at the moment of the
   decision.

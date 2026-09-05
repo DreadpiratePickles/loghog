@@ -211,7 +211,9 @@ jobs:
           # are present, whichever classes this shortlist happened to include.
           echo "--- the emitted dataset and the review carry the redacted case ---"
           for holder in "$demo/goldens/candidates-wa.yaml" "$demo/goldens/review-wa.md"; do
-            for leaked in 'susan.calvin@example.com' 'kim.reyes@example.com'                           '4242 4242 4242 4242' '4111-1111-1111-1111' '123-45-6789'                           'GB33BUKB20201555555555' '192.168.1.14' '221B Baker Street'; do
+            for leaked in 'susan.calvin@example.com' 'kim.reyes@example.com' \
+                          '4242 4242 4242 4242' '4111-1111-1111-1111' '123-45-6789' \
+                          'GB33BUKB20201555555555' '192.168.1.14' '221B Baker Street'; do
               if grep -qF "${leaked}" "${holder}"; then
                 echo "::error::${holder} carries ${leaked}. Redaction did not hold."
                 exit 1

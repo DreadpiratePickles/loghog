@@ -100,6 +100,26 @@ def test_a_hyphenated_card_is_found_with_its_separators():
     assert values_of("card 4111-1111-1111-1111 declined", CARD) == ["4111-1111-1111-1111"]
 
 
+@pytest.mark.parametrize(
+    "text,found",
+    [
+        ("card 4242.4242.4242.4242 declined", "4242.4242.4242.4242"),
+        ("card 4242_4242_4242_4242 declined", "4242_4242_4242_4242"),
+    ],
+)
+def test_a_dot_or_underscore_separated_card_is_found(text, found):
+    # A card pasted out of a spreadsheet column or a filename. Luhn still
+    # gates it, so widening the separator class does not widen the net over
+    # anything that is not a card.
+    assert values_of(text, CARD) == [found]
+
+
+def test_a_dotted_quad_is_still_an_address_and_not_a_card():
+    # The separator class now contains `.`, so the guard against a short dotted
+    # run becoming a card is the thirteen-digit minimum, and it is worth a test.
+    assert CARD not in classes_in("timing out from 192.168.1.14")
+
+
 def test_a_fifteen_digit_amex_is_a_card():
     assert values_of("amex 378282246310005", CARD) == ["378282246310005"]
 

@@ -5,7 +5,8 @@ Eight classes, in two groups.
 **Structural** — `EMAIL`, `CARD`, `IBAN`, `SSN`, `IPV4`. These have a shape a
 regex can be sure about, and two of them carry a checksum. A match here is
 almost never wrong, which is why these five and only these five are what the
-write guard re-checks in `redact.contains_hard_pii`.
+write guard re-checks in `redact.hard_pii_classes` — and in `contains_hard_pii`,
+which is that function emptied to a boolean rather than a second copy of it.
 
 **Heuristic** — `PHONE`, `ADDRESS`, `NAME`. These guess. A phone number and an
 order reference are both runs of digits; a street and a product name are both
@@ -23,7 +24,7 @@ left, which is the only order that keeps the earlier offsets valid.
 import re
 from dataclasses import dataclass
 
-from loghog.privacy.luhn import digits_only, luhn_ok
+from loghog.privacy.luhn import CARD_SEPARATORS, digits_only, luhn_ok
 
 EMAIL = "EMAIL"
 CARD = "CARD"
@@ -67,7 +68,15 @@ _CARD = re.compile(
     # candidate rather than a sliding window of them. That is what stops a
     # 24-digit machine id from being matched at the 16-digit Luhn-valid window
     # somewhere in its middle.
-    r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)"
+    #
+    # The separator class is `CARD_SEPARATORS` and not a literal, so the
+    # pattern and the checksum cannot come to disagree about what a separator
+    # is. It holds four characters: a card pasted out of a spreadsheet column
+    # or a filename arrives as `4242.4242.4242.4242` or `4242_4242_4242_4242`.
+    # Luhn gates every candidate anyway, so the wider class costs nothing that
+    # an order reference would pay, and the thirteen-digit minimum still keeps
+    # a dotted quad out.
+    rf"(?<!\d)\d(?:[{re.escape(CARD_SEPARATORS)}]?\d){{12,18}}(?!\d)"
 )
 
 _IBAN = re.compile(

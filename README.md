@@ -9,7 +9,7 @@
 [![ci](https://github.com/DreadpiratePickles/loghog/actions/workflows/ci.yml/badge.svg)](https://github.com/DreadpiratePickles/loghog/actions/workflows/ci.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)](.python-version)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![tests: 1141](https://img.shields.io/badge/tests-1141-brightgreen)](tests/)
+[![tests: 1168](https://img.shields.io/badge/tests-1168-brightgreen)](tests/)
 [![coverage: 99%](https://img.shields.io/badge/coverage-99%25-brightgreen)](#status)
 [![redaction: before the first write](https://img.shields.io/badge/redaction-before%20the%20first%20write-8a2be2)](#the-principle-nothing-unredacted-is-ever-written)
 [![model calls: 1 per case](https://img.shields.io/badge/model%20calls-1%20per%20case-8a2be2)](#the-one-model-call)
@@ -110,7 +110,7 @@ only reason they are allowed to exist.
 
 | | |
 |---|---|
-| 🩹 **Redaction is in the write path, not after it** | There is no file, at any point, holding unredacted production text. "We delete it afterwards" is a hope about a code path, not a privacy property |
+| 🩹 **Redaction is in the write path, not after it** | There is no file, at any point, holding unredacted production text — all five text fields, named in `REDACTED_TEXT_FIELDS` and re-checked at the door by the writer itself. "We delete it afterwards" is a hope about a code path, not a privacy property |
 | 💳 **A card is not sixteen digits** | Luhn separates `4242 4242 4242 4242` from `1234567812345678`. A redactor that blanks both has destroyed *"why was order 1234567812345678 charged twice"*, which was the case |
 | 🔗 **The email inside the URL** | `https://app.example.com/users/sam@example.com?ref=1`. The most common way an address survives a redactor is by not having spaces around it. It is in the samples so the suite fails if that regresses |
 | 🏷️ **`[EMAIL_1]` means the same person everywhere** | Tokens are stable across a whole window, so a later stage can still tell *one customer wrote in three times* from *three customers wrote in once*. The map from token to value is never written down |
@@ -629,6 +629,20 @@ Read these before pointing it at anything real.
   string to a regex, and blanking every Title Case pair would remove every product name in your dataset.
   An address in a language whose street words are not in the list survives. A seven-digit local phone
   number with no country code and only two groups survives.
+- **"No file holds unredacted production text" is a claim about the text fields.** Five of them —
+  `input_text`, `output_text`, `feedback`, `error` and each `judge_verdicts[].criterion` — go through the
+  redactor and are re-checked by the write guard, and `REDACTED_TEXT_FIELDS` is one list both of them
+  import so they cannot drift apart again. `record_id`, `prompt_version` and `arm` are deliberately
+  **not** redacted: they are identifiers and labels, and redacting an id would break dedupe, the manifest
+  and every cross-reference a later stage makes. If your logs key records by the customer's address, that
+  address reaches `records.jsonl` in the `record_id` field. Map something else to `record_id`.
+- **The structural detectors miss three things, and they are named.** A bare nine-digit SSN —
+  `123456789`, no separators — is not detected: the pattern requires the hyphens or spaces, because
+  without them it is indistinguishable from an order reference and matching it would blank one on every
+  line. **IPv6 is not detected at all**; the address pattern is a dotted quad and nothing else. A card
+  separated by anything outside `CARD_SEPARATORS` — a slash, say — is likewise missed. The first two are
+  forced trade-offs, the third is a gap; all three mean `contains_hard_pii` returns `False` for text a
+  human would call personal, and so does the write guard built on it.
 - **And it over-redacts in the other direction.** "Dr Calvin Called back" becomes "[NAME_1] back". That is
   the direction to be wrong in, and there is a test named after the trade-off.
 - **`records/` is gitignored, not encrypted.** The property this tool provides is that personal data is
@@ -654,8 +668,8 @@ Read these before pointing it at anything real.
 
 ```bash
 uv sync
-uv run pytest -q                        # 1141 tests, none touching the network
-uv run pytest -q --cov=src/loghog       # 99% of 3,813 statements
+uv run pytest -q                        # 1168 tests, none touching the network
+uv run pytest -q --cov=src/loghog       # 99% of 3,824 statements
 uv run ruff check .                      # line length 100
 ```
 
@@ -674,8 +688,8 @@ that `promote` refuses a placeholder, and asserting at the end that the checkout
 
 | | |
 |---|---|
-| Tests | **1141**, `uv run pytest -q`, none touching the network |
-| Coverage | **99%** of 3,813 statements, `uv run pytest -q --cov=src/loghog` |
+| Tests | **1168**, `uv run pytest -q`, none touching the network |
+| Coverage | **99%** of 3,824 statements, `uv run pytest -q --cov=src/loghog` |
 | Lint | `uv run ruff check .` clean, line length 100 |
 | Stages built | **9 of 9** |
 | Deterministic stages | 8. The ninth makes one call per case |

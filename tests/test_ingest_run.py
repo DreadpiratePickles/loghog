@@ -155,6 +155,77 @@ def test_the_manifest_says_redaction_was_on(tmp_path):
     assert outcome.manifest.redaction["enabled"] is True
 
 
+# A judge criterion is free text taken verbatim from the customer's log —
+# `samples/judged_summaries.toml` maps one — so it is a text field like the
+# other four and has to go through the redactor like the other four.
+JUDGED_MAPPING = SAMPLES_DIR / "judged_summaries.toml"
+
+
+def run_judged(tmp_path, row, **overrides):
+    config = load_test_config(tmp_path)
+    path = write_jsonl(tmp_path / "judged.jsonl", [row])
+    kwargs = {
+        "input_path": path,
+        "source_format": "jsonl",
+        "mapping_reference": str(JUDGED_MAPPING),
+        "window": "judged",
+        "synthetic": True,
+    }
+    kwargs.update(overrides)
+    return config, ingest(config, **kwargs)
+
+
+def leaky_verdict_row(criterion):
+    return {
+        "request_id": "js-900",
+        "ts_utc": "2026-09-04T09:00:00Z",
+        "prompt_label": "summarise-1.0",
+        "question": "The parcel was left in the recycling bin.",
+        "answer": '{"summary": "A parcel was left in a bin."}',
+        "verdicts": [{"criterion": criterion, "ok": False}],
+        "latency_ms": 410,
+    }
+
+
+def test_an_address_in_a_judge_criterion_is_redacted(tmp_path):
+    _, outcome = run_judged(
+        tmp_path, leaky_verdict_row("names susan.calvin@example.com as the sender")
+    )
+    blob = WindowStore(outcome.directory).records_path.read_text(encoding="utf-8")
+    assert "susan.calvin@example.com" not in blob
+    assert "[EMAIL_1]" in blob
+
+
+def test_a_card_in_a_judge_criterion_is_redacted(tmp_path):
+    _, outcome = run_judged(
+        tmp_path, leaky_verdict_row("quotes the card 4242 4242 4242 4242 in full")
+    )
+    blob = WindowStore(outcome.directory).records_path.read_text(encoding="utf-8")
+    assert "4242 4242 4242 4242" not in blob
+    assert "[CARD_1]" in blob
+
+
+def test_a_criterion_shares_its_token_with_the_question(tmp_path):
+    # The whole point of a stable token: the address the customer wrote and the
+    # address the judge quoted back are one person, and must read as one.
+    row = leaky_verdict_row("names susan.calvin@example.com as the sender")
+    row["question"] = "susan.calvin@example.com never got the parcel."
+    _, outcome = run_judged(tmp_path, row)
+    record = records_of(outcome)[0]
+    assert record["input_text"] == "[EMAIL_1] never got the parcel."
+    assert record["judge_verdicts"][0]["criterion"] == "names [EMAIL_1] as the sender"
+
+
+def test_the_redaction_report_counts_a_criterion_it_changed(tmp_path):
+    # The manifest is the evidence. A replacement made in a criterion has to
+    # appear in the count, or the report understates what the run did.
+    _, outcome = run_judged(
+        tmp_path, leaky_verdict_row("names susan.calvin@example.com as the sender")
+    )
+    assert outcome.manifest.redaction["by_class"]["EMAIL"] == 1
+    assert outcome.manifest.redaction["total"] == 1
+
+
 def test_turning_redaction_off_without_the_flag_refuses_before_anything_is_written(tmp_path):
     with pytest.raises(UnredactedWriteError):
         run(tmp_path, substitutions=[("redact = true", "redact = false")])

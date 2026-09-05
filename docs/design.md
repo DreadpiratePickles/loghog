@@ -222,10 +222,27 @@ afterwards" is not a privacy property. It is a hope about a code path.
 upstream is a hope about code somebody might refactor next month.
 
 `WindowStore.append_records` runs the five structural detectors over every
-record about to become bytes and refuses the whole batch if one still matches.
-That refusal is what makes the default a guarantee. It has a cost — the
-detectors run twice — and the cost is a rounding error next to being wrong about
-this once.
+*text field* of every record about to become bytes and refuses the whole batch
+if one still matches. That refusal is what makes the default a guarantee. It has
+a cost — the detectors run twice — and the cost is a rounding error next to
+being wrong about this once.
+
+"Every text field" is a list, `REDACTED_TEXT_FIELDS`, and the redactor and the
+guard import the same one rather than each declaring its own. The first version
+of this design had two tuples that happened to match, and a fifth free-text
+field — `judge_verdicts[].criterion`, mapped straight out of the customer's log
+by `judged_summaries.toml` — was added to neither. A criterion reading "names
+sam@example.com as the sender" reached `records.jsonl` verbatim and would have
+reached the provider in the `<verdicts>` block of the drafting prompt, in the
+same message whose `<input>` block correctly read `[EMAIL_1]`. A criterion is
+not reachable by name from that list, because it lives inside a tuple; both
+callers walk it explicitly, and a parametrised test walks the list and asserts
+the guard fires for every entry.
+
+The three fields deliberately outside it are `record_id`, `prompt_version` and
+`arm`. They are identifiers and labels rather than prose, and redacting an id
+would break dedupe, the manifest and every cross-reference a later stage makes.
+That is a real limit on the guarantee and the README says so.
 
 ## 17. Why the guard uses five of the eight classes
 

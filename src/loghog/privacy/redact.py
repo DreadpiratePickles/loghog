@@ -155,14 +155,31 @@ def _canonical(span: Span) -> str:
     return " ".join(span.value.split()).lower()
 
 
-def contains_hard_pii(text: str | None) -> bool:
-    """Whether `text` still holds personal data of a *structural* class.
+def hard_pii_classes(text: str | None) -> tuple[str, ...]:
+    """The *structural* PII classes still present in `text`, sorted, deduplicated.
 
     This is the write guard, not a second redactor. It asks only about the five
     classes a regex can be sure about — an email, a Luhn-valid card, an IBAN, an
     SSN, a dotted quad — because a guard that fired on the heuristics would
     refuse an honest ingest over a product name that looked like a street.
+
+    It returns the classes rather than a boolean because the writer's refusal
+    message names them. The class, never the value: that message goes into logs
+    and tickets, and quoting what leaked would leak it again.
     """
     if not text:
-        return False
-    return any(span.pii_class in STRUCTURAL_CLASSES for span in find_spans(text))
+        return ()
+    found = {
+        span.pii_class for span in find_spans(text) if span.pii_class in STRUCTURAL_CLASSES
+    }
+    return tuple(sorted(found))
+
+
+def contains_hard_pii(text: str | None) -> bool:
+    """Whether `text` still holds personal data of a structural class.
+
+    The boolean form of `hard_pii_classes`, and defined in terms of it rather
+    than beside it: one predicate with two spellings is one predicate that can
+    disagree with itself after somebody edits only the spelling they found.
+    """
+    return bool(hard_pii_classes(text))

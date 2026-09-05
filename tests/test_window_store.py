@@ -12,6 +12,7 @@ import pytest
 
 from conftest import make_record
 from loghog.errors import ManifestError, UnredactedWriteError, WindowConflictError
+from loghog.record import REDACTED_TEXT_FIELDS, JudgeVerdict
 from loghog.window.store import (
     ERRORS_NAME,
     MANIFEST_NAME,
@@ -96,6 +97,51 @@ def test_the_guard_checks_the_output_as_well_as_the_input(tmp_path):
     leaky = make_record(output_text="I have refunded card 4242 4242 4242 4242")
     with pytest.raises(UnredactedWriteError):
         store.append_records([leaky], redaction_enabled=True)
+
+
+def test_the_guard_checks_the_verdict_criteria_too(tmp_path):
+    # A criterion is free text lifted verbatim out of the customer's log —
+    # `judged_summaries.toml` maps one — so it is a fifth way production text
+    # reaches this file, and the guard has to know about it.
+    store = store_at(tmp_path)
+    leaky = make_record(
+        judge_verdicts=(
+            JudgeVerdict(criterion="mentions susan.calvin@example.com", passed=False),
+        )
+    )
+    with pytest.raises(UnredactedWriteError, match="EMAIL"):
+        store.append_records([leaky], redaction_enabled=True)
+
+
+@pytest.mark.parametrize("field_name", REDACTED_TEXT_FIELDS)
+def test_the_guard_covers_every_field_the_redactor_covers(tmp_path, field_name):
+    # The two tuples must not drift. A sixth text field added to the redactor
+    # and forgotten here is exactly how a criterion reached disk unredacted.
+    store = store_at(tmp_path)
+    # A record carries an output or an error, never both, so setting `error`
+    # means clearing the output that `make_record` supplies by default.
+    fields = {field_name: "write to sam@example.com"}
+    if field_name == "error":
+        fields["output_text"] = None
+    leaky = make_record(**fields)
+    with pytest.raises(UnredactedWriteError, match="EMAIL"):
+        store.append_records([leaky], redaction_enabled=True)
+
+
+def test_the_verdict_refusal_names_the_field_but_not_the_value(tmp_path):
+    store = store_at(tmp_path)
+    leaky = make_record(
+        record_id="r-7",
+        judge_verdicts=(
+            JudgeVerdict(criterion="quotes card 4242 4242 4242 4242", passed=True),
+        ),
+    )
+    with pytest.raises(UnredactedWriteError) as caught:
+        store.append_records([leaky], redaction_enabled=True)
+    message = str(caught.value)
+    assert "r-7" in message
+    assert "judge_verdicts" in message
+    assert "4242 4242 4242 4242" not in message
 
 
 def test_a_refused_write_leaves_nothing_behind(tmp_path):

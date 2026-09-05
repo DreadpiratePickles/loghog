@@ -35,7 +35,7 @@ from loghog.ingest.readers import ReadLine, read_source, source_sha256
 from loghog.ingest.report import render_report
 from loghog.ingest.sidecar import load_sidecar
 from loghog.privacy.redact import Redactor
-from loghog.record import TIMESTAMP_FORMAT, Record
+from loghog.record import REDACTED_TEXT_FIELDS, TIMESTAMP_FORMAT, Record
 from loghog.window.dedupe import Deduper
 from loghog.window.manifest import IngestCounts, Manifest, SourceEntry
 from loghog.window.store import WindowStore
@@ -44,7 +44,10 @@ EXIT_OK = 0
 EXIT_PARTIAL = 1
 EXIT_NOTHING = 2
 
-_REDACTED_FIELDS = ("input_text", "output_text", "feedback", "error")
+_REDACTED_FIELDS = REDACTED_TEXT_FIELDS
+"""The four plain text fields, imported so this module and the write guard
+cannot come to disagree about what they are. `judge_verdicts[].criterion` is the
+fifth, and is handled separately in `_redacted` because it lives in a tuple."""
 
 
 @dataclass(frozen=True)
@@ -249,11 +252,23 @@ def _record_for(
 
 
 def _redacted(record: Record, redactor: Redactor) -> Record:
-    """Every text field of a record, through the redactor, before anything is written."""
+    """Every text field of a record, through the redactor, before anything is written.
+
+    A judge criterion counts as a text field. `judged_summaries.toml` maps one
+    straight out of the customer's log, and a criterion reading "names
+    sam@example.com as the sender" is the customer's data however deep in the
+    record it sits — it reaches `records.jsonl`, and from there the `<verdicts>`
+    block of the drafting prompt.
+    """
     from dataclasses import replace
 
+    verdicts = tuple(
+        replace(verdict, criterion=redactor.redact(verdict.criterion))
+        for verdict in record.judge_verdicts
+    )
     return replace(
         record,
+        judge_verdicts=verdicts,
         **{name: redactor.redact(getattr(record, name)) for name in _REDACTED_FIELDS},
     )
 

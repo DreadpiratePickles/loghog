@@ -22,8 +22,8 @@ from loghog.errors import (
     UnredactedWriteError,
     WindowConflictError,
 )
-from loghog.privacy.detect import STRUCTURAL_CLASSES, find_spans
-from loghog.record import Record, record_from_json_dict
+from loghog.privacy.redact import hard_pii_classes
+from loghog.record import REDACTED_TEXT_FIELDS, Record, record_from_json_dict
 from loghog.window.manifest import Manifest, manifest_from_json_dict
 
 RECORDS_NAME = "records.jsonl"
@@ -38,7 +38,10 @@ CLUSTER_REPORT_NAME = "cluster.md"
 DIRECTORY_MODE = 0o700
 FILE_MODE = 0o600
 
-_GUARDED_FIELDS = ("input_text", "output_text", "feedback", "error")
+_GUARDED_FIELDS = REDACTED_TEXT_FIELDS
+"""The four plain text fields, imported so the guard and the redactor cannot
+come to disagree about what they are. A judge criterion is the fifth and is
+checked separately below, because it lives in a tuple rather than on the record."""
 
 
 class WindowStore:
@@ -136,17 +139,20 @@ class WindowStore:
 
     @staticmethod
     def _guard(record: Record) -> None:
-        for field_name in _GUARDED_FIELDS:
-            value = getattr(record, field_name)
-            if not value:
-                continue
-            leaked = sorted(
-                {
-                    span.pii_class
-                    for span in find_spans(value)
-                    if span.pii_class in STRUCTURAL_CLASSES
-                }
-            )
+        """Every free-text field of a record, re-checked at the moment of writing.
+
+        A judge criterion is free text lifted verbatim out of the customer's
+        log — `samples/judged_summaries.toml` maps one — so it is guarded like
+        the other four rather than trusted for living in a nested structure.
+
+        The predicate is `hard_pii_classes` and not a comprehension repeated
+        here. A privacy check with two implementations is a privacy check that
+        can be half-fixed.
+        """
+        texts = [(name, getattr(record, name)) for name in _GUARDED_FIELDS]
+        texts += [("judge_verdicts", verdict.criterion) for verdict in record.judge_verdicts]
+        for field_name, value in texts:
+            leaked = hard_pii_classes(value)
             if leaked:
                 # The class, never the value: this message goes into logs and
                 # tickets, and quoting what leaked would leak it again.

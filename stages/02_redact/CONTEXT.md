@@ -17,7 +17,7 @@ delimited addresses misses the one inside a URL, which is most of them.
 
 | Path or source | Layer | Authority | Required | Relevant section |
 |---|---:|---|---:|---|
-| The text fields of a built record | 4 | Authoritative | Yes | `input_text`, `output_text`, `feedback`, `error` |
+| The text fields of a built record | 4 | Authoritative | Yes | `input_text`, `output_text`, `feedback`, `error`, `judge_verdicts[].criterion` |
 | `loghog.toml` | 3 | Authoritative | Yes | `[privacy] redact`, `[privacy] name_allowlist` |
 
 This stage has no output directory and no command of its own to write anything.
@@ -44,8 +44,12 @@ point it at their own text and see what would survive, and it writes nothing.
    is `[EMAIL_1]`; the replacement pass runs right to left so that each edit
    leaves the offsets of the spans still to be replaced exactly where they were.
 6. **Re-check at the door.** `WindowStore.append_records` runs the five
-   structural detectors over every record about to be written and refuses the
-   whole batch if one still matches.
+   structural detectors over every free-text field of every record about to be
+   written — the four plain fields and each `judge_verdicts[].criterion` — and
+   refuses the whole batch if one still matches. The predicate it calls is
+   `redact.hard_pii_classes`, the same one `contains_hard_pii` is defined in
+   terms of: a privacy check with two implementations is one that can be
+   half-fixed.
 
 ## Outputs
 
@@ -59,7 +63,7 @@ memory for the length of one run and is never written anywhere.
 
 ## Verify
 
-- `tests/test_privacy_detect.py` — 69 cases, every one of them something
+- `tests/test_privacy_detect.py` — 72 cases, every one of them something
   somebody actually types: an email inside a URL, a `mailto:`, an address in
   angle brackets, a Luhn-valid card beside a sixteen-digit order reference, a
   24-digit machine id containing a Luhn-valid window, an IP at the end of a
@@ -70,11 +74,14 @@ memory for the length of one run and is never written anywhere.
 - `tests/test_privacy_redact.py` — token stability within a text, across calls
   and across spellings; that the report never contains what it removed; that
   re-running over already-redacted text is a no-op.
-- `tests/test_window_store.py` — the write guard, including that a refused write
-  leaves nothing behind.
+- `tests/test_window_store.py` — the write guard, including that a criterion
+  carrying an address is refused by name and that a refused write leaves nothing
+  behind.
 - End to end, `tests/test_ingest_run.py` asserts on the bytes of the written
   file: no address survives, the URL-embedded one was the one caught, the card is
-  gone, the order reference is not, and `Dr Pepper` is still there.
+  gone, the order reference is not, and `Dr Pepper` is still there. It ingests
+  the judged mapping too, and asserts that an address in a verdict criterion is
+  tokenised and shares its token with the same address in the question.
 
 ## Approval
 
@@ -111,6 +118,11 @@ private as its least careful run.
   anybody dials — `9911-2233` in the sample CSV is one — so a bare two-group
   run is left alone. A real seven-digit local number written without any of the
   three markers would survive.
+- **A judge criterion is a text field.** `judged_summaries.toml` maps one
+  straight out of the customer's log, so it goes through the redactor and the
+  write guard exactly like `input_text` does. It is the one text field that
+  lives inside a tuple rather than on the record, which is precisely why it was
+  missed once.
 - **`PHONE` is not in the write guard.** It has the widest net of the three
   heuristics, and a guard built on it would refuse an honest ingest because a
   product code looked dialable. It is still redacted; it is just not what the

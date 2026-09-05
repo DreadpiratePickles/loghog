@@ -52,6 +52,23 @@ RECORD_KEYS = frozenset(
 COUNT_FIELDS = ("latency_ms", "input_tokens", "output_tokens", "cost_micro_usd")
 OPTIONAL_TEXT_FIELDS = ("prompt_version", "arm", "feedback", "error")
 
+REDACTED_TEXT_FIELDS = ("input_text", "output_text", "feedback", "error")
+"""The named fields that hold text the customer wrote, in one place.
+
+Both the redactor (`ingest.run`) and the write guard (`window.store`) traverse
+exactly this list, by importing it rather than by each declaring its own copy.
+Two tuples that must agree are two tuples that can disagree, and the first time
+they did, a fifth text field reached disk unredacted.
+
+The fifth field is `judge_verdicts[].criterion`, which cannot appear here
+because it lives inside a tuple rather than on the record. Both callers handle
+it explicitly, and `tests/test_window_store.py` asserts the guard covers it.
+
+`record_id`, `prompt_version` and `arm` are deliberately absent. They are
+identifiers and labels, not prose: redacting an id would break dedupe, the
+manifest and every cross-reference a later stage makes.
+"""
+
 _WHITESPACE = re.compile(r"\s+")
 
 

@@ -11,6 +11,8 @@ import pytest
 
 from loghog.errors import FieldTypeError, MissingFieldError, RecordError, TimestampError
 from loghog.record import (
+    RECORD_KEYS,
+    REDACTED_TEXT_FIELDS,
     TIMESTAMP_FORMAT,
     JudgeVerdict,
     Record,
@@ -325,3 +327,26 @@ def test_different_inputs_get_different_fingerprints():
 def test_the_fingerprint_of_a_record_is_the_fingerprint_of_its_input():
     record = make_record()
     assert record.input_fingerprint() == input_fingerprint(OK_FIELDS["input_text"])
+
+
+# --- the redacted field set -------------------------------------------------
+
+
+def test_the_redacted_field_set_is_the_four_plain_text_fields():
+    # The fifth is `judge_verdicts[].criterion`, which lives inside a tuple and
+    # so cannot be reached by name from this list.
+    assert REDACTED_TEXT_FIELDS == ("input_text", "output_text", "feedback", "error")
+
+
+def test_every_named_field_is_really_a_field_of_a_record():
+    assert set(REDACTED_TEXT_FIELDS) <= RECORD_KEYS
+
+
+def test_the_redactor_and_the_write_guard_read_the_same_list():
+    # One list, imported twice — not two lists that happen to match today. The
+    # defect this test exists for was a field added to neither.
+    from loghog.ingest.run import _REDACTED_FIELDS
+    from loghog.window.store import _GUARDED_FIELDS
+
+    assert _REDACTED_FIELDS is REDACTED_TEXT_FIELDS
+    assert _GUARDED_FIELDS is REDACTED_TEXT_FIELDS

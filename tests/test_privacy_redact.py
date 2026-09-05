@@ -10,7 +10,12 @@ import pytest
 
 from loghog.errors import RedactionError
 from loghog.privacy.detect import CARD, EMAIL, IPV4
-from loghog.privacy.redact import Redactor, contains_hard_pii, redaction_token
+from loghog.privacy.redact import (
+    Redactor,
+    contains_hard_pii,
+    hard_pii_classes,
+    redaction_token,
+)
 
 
 def test_a_token_names_its_class_and_its_index():
@@ -207,6 +212,32 @@ def test_the_hard_check_passes_redacted_text():
 
 def test_the_hard_check_tolerates_none():
     assert contains_hard_pii(None) is False
+
+
+def test_the_hard_check_names_the_classes_it_found():
+    # The guard needs the class list for its refusal message, and the boolean
+    # is that list emptied. One implementation, or the two drift.
+    assert hard_pii_classes("sam@example.com from 192.168.1.14") == ("EMAIL", "IPV4")
+
+
+def test_the_class_list_is_empty_for_clean_text():
+    assert hard_pii_classes("just a lamp") == ()
+
+
+def test_the_class_list_tolerates_none():
+    assert hard_pii_classes(None) == ()
+
+
+def test_the_boolean_is_the_class_list_emptied():
+    for text in ["sam@example.com", "just a lamp", "Dr Susan Calvin", "", None]:
+        assert contains_hard_pii(text) is bool(hard_pii_classes(text))
+
+
+@pytest.mark.parametrize("text", ["4242.4242.4242.4242", "4242_4242_4242_4242"])
+def test_a_dot_or_underscore_separated_card_is_hard_pii(text):
+    # Somebody pasted a card out of a spreadsheet. Luhn still gates it, so the
+    # wider separator class costs nothing an order reference would pay.
+    assert contains_hard_pii(text) is True
 
 
 # --- disabled ---------------------------------------------------------------

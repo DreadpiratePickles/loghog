@@ -17,22 +17,35 @@ MIN_CARD_DIGITS = 13
 MAX_CARD_DIGITS = 19
 """ISO/IEC 7812's maximum. Above it, whatever it is, it is not a PAN."""
 
+CARD_SEPARATORS = " -._"
+"""The characters that may sit between the groups of a card number.
+
+Space and hyphen are how a person types one. Dot and underscore are how a card
+arrives out of a spreadsheet column or a filename, and a redactor that misses
+`4242.4242.4242.4242` misses a real paste. The detector builds its separator
+character class from this string, so the pattern and the checksum cannot come
+to disagree about what a separator is.
+"""
+
 
 def digits_only(text: str) -> str:
-    """The digits of `text`, with spaces and hyphens dropped."""
+    """The digits of `text`, with every separator dropped."""
     return "".join(character for character in text if character.isdigit())
 
 
 def luhn_ok(text: str) -> bool:
     """Whether `text` is a card-shaped number with a valid Luhn checksum.
 
-    Separators (spaces and hyphens) are ignored because that is how people type
-    a card. Any other non-digit character makes it not a number at all — a run
-    containing letters is an identifier, not a PAN.
+    Separators (`CARD_SEPARATORS`) are ignored because that is how people type a
+    card and how a spreadsheet exports one. Any other non-digit character makes
+    it not a number at all — a run containing letters is an identifier, not a
+    PAN.
     """
     if not isinstance(text, str):
         return False
-    stripped = text.replace(" ", "").replace("-", "")
+    stripped = text
+    for separator in CARD_SEPARATORS:
+        stripped = stripped.replace(separator, "")
     if not stripped or not stripped.isdigit():
         return False
     if not MIN_CARD_DIGITS <= len(stripped) <= MAX_CARD_DIGITS:
